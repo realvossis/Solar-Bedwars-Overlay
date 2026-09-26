@@ -13,6 +13,7 @@ const KINDS = {
   partyInvite:   { color: '#3fb950', icon: 'party' },
   friendRequest: { color: '#3ddc97', icon: 'userPlus' },
   threat:        { color: '#f85149', icon: 'alert' },
+  nicked:        { color: '#22d3ee', icon: 'eye' },
   nameWatch:     { color: '#bc8cff', icon: 'sparkle' },
 };
 const RANKCOLOR = { SUPERSTAR: '#ffaa00', MVP_PLUS: '#55ffff', MVP: '#55ffff', VIP_PLUS: '#55ff55', VIP: '#55ff55', YOUTUBER: '#ff5555', ADMIN: '#ff5555' };
@@ -41,6 +42,7 @@ const SOUNDS = {
   friendRequest: (v) => tone(988, 0, 0.3, v * 0.35),
   threat:    (v) => { tone(220, 0, 0.16, v * 0.55, 'triangle'); tone(220, 0.2, 0.2, v * 0.55, 'triangle'); tone(330, 0.2, 0.2, v * 0.25); },
   nameWatch: (v) => { tone(1319, 0, 0.25, v * 0.35); tone(1976, 0.09, 0.4, v * 0.3); },
+  nicked:    (v) => { tone(740, 0, 0.18, v * 0.4, 'triangle'); tone(554, 0.12, 0.3, v * 0.4, 'triangle'); },
 };
 function play(kind, volume) {
   try {

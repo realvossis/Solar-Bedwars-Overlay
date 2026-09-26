@@ -84,5 +84,27 @@ t('Name Watch: changing rules re-checks existing rows silently', () => {
   assert.deepStrictEqual(seen, []);
 });
 
-console.log(`\n${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+// Async ones: let the lookup queue run.
+const settle = () => new Promise((r) => setTimeout(r, 30));
+(async () => {
+  await (async () => {
+    const r = make(); const loaded = [];
+    r.on('loaded', (row) => loaded.push(row));
+    r.addNames(['SomeNick'], 'GAME'); await settle();
+    t('a nick (no Mojang account) is flagged and announced for the nick alert', () => {
+      assert.strictEqual(r.players.get('somenick').nicked, true);
+      assert.deepStrictEqual(loaded.map((x) => x.name), ['SomeNick']);
+    });
+  })();
+  await (async () => {
+    const r = new Roster({ resolveUuid: async () => { throw new Error('mojang rate limit'); } }, {}, () => ({ concurrency: 1 }));
+    const loaded = []; r.on('loaded', (row) => loaded.push(row));
+    r.addNames(['RealPlayer'], 'GAME'); await settle();
+    t('a Mojang outage is an error, never a false "nicked"', () => {
+      const row = r.players.get('realplayer');
+      assert.ok(!row.nicked); assert.match(row.error, /rate limit/); assert.strictEqual(loaded.length, 0);
+    });
+  })();
+  console.log(`\n${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
+})();

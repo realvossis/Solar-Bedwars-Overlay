@@ -169,7 +169,7 @@ function panelGeneral(p) {
   const aliases = el('input'); aliases.type = 'text'; aliases.style.width = '240px';
   aliases.value = (cfg.reactNames || []).join(', '); aliases.placeholder = 'alt1, alt2';
   aliases.onchange = () => set('reactNames', aliases.value.split(',').map((s) => s.trim()).filter(Boolean));
-  p.appendChild(fieldRow('Extra alias names', 'Comma-separated. Overlay also reacts to these.', aliases));
+  p.appendChild(fieldRow('Extra alias names', 'Comma-separated. Overlay also reacts to these. Add your own nicks here too, so you aren\'t alerted about yourself as a nicked player.', aliases));
   p.appendChild(fieldRow('Hide yourself from the list', '', toggle('hideSelf')));
   p.appendChild(fieldRow('Hide nicked / unresolved players', '', toggle('hideNicked')));
 }
@@ -212,6 +212,7 @@ const NOTIFY_EVENTS = [
   ['partyInvite', 'Party invite'],
   ['friendRequest', 'Friend request'],
   ['threat', 'Threat joins your lobby'],
+  ['nicked', 'Nicked player joins your lobby'],
   ['nameWatch', 'Name Watch match'],
 ];
 function panelNotifications(p) {

@@ -11,6 +11,7 @@ class FakeWindow {
   isDestroyed() { return false; } isVisible() { return this.visible; }
   showInactive() { calls.push('showInactive'); this.visible = true; }
   show() { calls.push('show'); } focus() { calls.push('focus'); } hide() { this.visible = false; } destroy() {}
+  moveTop() { calls.push('moveTop'); }
 }
 const origLoad = Module._load;
 Module._load = function (req, ...rest) {
@@ -36,6 +37,8 @@ const ALL_ON = { enabled: true, sound: true, events: {} };
     assert.strictEqual(w.clickThrough, true, 'window must be click-through');
     assert.ok(calls.includes('showInactive'));
     assert.ok(!calls.includes('show') && !calls.includes('focus'), 'must never call show()/focus(): ' + calls.join(','));
+    // Raised above a borderless-fullscreen game on every popup - without activation.
+    assert.ok(calls.includes('moveTop'), 'popup must be raised to the top when shown');
   });
   await t('anchored to the chosen corner', async () => {
     const n = make({ ...ALL_ON, position: 'top-left' });

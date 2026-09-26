@@ -14,7 +14,7 @@ const { LogWatcher, validName } = require('./logWatcher');
 const nameRules = require('./nameRules');
 const fs = require('fs');
 const { NickRoller, buildRequirements } = require('./nickRoller');
-const { Notifier } = require('./notifications');
+const { Notifier, raiseInactive } = require('./notifications');
 const statsLib = require('./stats');
 const { WinHelper } = require('./winHelper');
 const { loadFont } = require('./bookReader');
@@ -241,7 +241,7 @@ function wireWatcher() {
     // fallback patterns can't tell) - leave currentServer alone rather than guessing. Any real
     // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
     if (info && info.server !== undefined) currentServer = info.server;
-    threatsAlerted.clear(); // new lobby: a sniper you meet again deserves a fresh heads-up
+    threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
     if (getConfig().clearOnServerChange) roster.clear();
     if (pendingHouseOwner && Date.now() - pendingHouseOwnerTs < 8000) roster.addNames([pendingHouseOwner], 'house');
     pendingHouseOwner = null;
@@ -307,7 +307,7 @@ async function notifyUser(kind, { title, player, text }, fallback, fallbackKind 
   try { id = await notifier.notify({ kind, title, text, player, stats: player && kind !== 'nickMatch' ? summaryFromRoster(player) : null }); } catch (_) {}
   if (!id) { toast(fallback, fallbackKind); return; }
   if (player && kind !== 'nickMatch' && !summaryFromRoster(player)) {
-    playerSummary(player).then((s) => notifier.update(id, s)).catch(() => notifier.update(id, { name: player, nicked: true }));
+    playerSummary(player).then((s) => notifier.update(id, s)).catch(() => {}); // lookup failed: card keeps its placeholders
   }
 }
 
@@ -349,6 +349,19 @@ function checkThreat(row) {
   const top = u.primary;
   const text = flagged && top ? `${top.label || 'Blacklisted'}${top.reason ? ': ' + top.reason : ''}` : `Sniper score ${score} (${row.sniper.label})`;
   notifyUser('threat', { title: 'Threat in your lobby', player: row.name, text }, `Threat: ${row.name}`, 'warn');
+}
+
+// A nicked player (no real Mojang account behind the name) just showed up in your lobby. Once per
+// name per lobby. Not for you, your party, or any alias you listed in Settings -> General (add your
+// own nicks there so you aren't alerted about yourself).
+const nicksAlerted = new Set();
+function checkNick(row) {
+  if (!row.nicked || row.source === 'SELF' || row.source === 'PARTY' || row.left || nicksAlerted.has(row.key)) return;
+  const cfg = getConfig();
+  const mine = [cfg.selfName, ...(cfg.reactNames || [])].map((n) => String(n || '').toLowerCase());
+  if (mine.includes(row.key)) return;
+  nicksAlerted.add(row.key);
+  notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
 }
 
 // ---------------- nick roller ----------------
@@ -503,7 +516,9 @@ function registerIpc() {
   // Accepts a username or a UUID (with or without dashes).
   handle('lookup:name', async (_e, query) => {
     const q = cleanText(query, 40);
-    const r = isUuid(q) ? await hypixel.resolveName(q) : (validName(q) ? await hypixel.resolveUuid(q) : null);
+    let r;
+    try { r = isUuid(q) ? await hypixel.resolveName(q) : (validName(q) ? await hypixel.resolveUuid(q) : null); }
+    catch (e) { return { ok: false, error: 'lookup failed (' + String(e.message || e) + ') - try again' }; }
     if (!r) return { ok: false, error: 'not found (nicked or invalid)' };
     const ur = await urchin.lookup(r.id, r.name).catch(() => null);
     return { ok: true, uuid: r.id, name: r.name, urchin: ur };
@@ -657,6 +672,7 @@ if (!app.requestSingleInstanceLock()) {
       notifyUser('nameWatch', { title: 'Name Watch', player: row.name, text: 'Matches ' + row.nameMatch.join(', ') }, `Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn');
     });
     roster.on('loaded', checkThreat);
+    roster.on('loaded', checkNick);
     wireWatcher();
     notifier = new Notifier({ getConfig, webPreferences: SECURE_PREFS, anchorWindow: () => overlayWin });
     setupNickRoller();
@@ -669,6 +685,14 @@ if (!app.requestSingleInstanceLock()) {
     applyRefreshTimer();
     applyNameWatch();
     applySelf(); // your own IGN, if configured, is in the list from the moment the app starts
+    // Stay-on-top watchdog: a borderless-fullscreen game (F11) jumps above all topmost windows each
+    // time it's activated, hiding the overlay and popups behind it. Re-raise whatever of ours is
+    // visible, never activating it (see raiseInactive), so the game keeps focus.
+    setInterval(() => {
+      if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible() && getConfig().alwaysOnTop) raiseInactive(overlayWin);
+      const nw = notifier && notifier.window;
+      if (nw && !nw.isDestroyed() && nw.isVisible()) raiseInactive(nw);
+    }, 1500);
 
     app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
   });

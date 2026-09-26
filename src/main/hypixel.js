@@ -54,6 +54,8 @@ class Hypixel {
 
   setRateLimit(maxPer5min) { this.limiter = makeLimiter(maxPer5min, 5 * 60 * 1000); }
 
+  // null = Mojang says no such account (i.e. a nick). Network/rate-limit failures throw instead of
+  // pretending the player is nicked - otherwise a Mojang hiccup looks like a lobby full of nicks.
   async resolveUuid(name) {
     const key = name.toLowerCase();
     const hit = this.uuidCache[key];
@@ -61,13 +63,16 @@ class Hypixel {
     try {
       const r = await fetch('https://api.mojang.com/users/profiles/minecraft/' + encodeURIComponent(name), withTimeout());
       if (r.status === 204 || r.status === 404) return null; // nicked / nonexistent
-      if (!r.ok) throw new Error('mojang ' + r.status);
+      if (!r.ok) throw new Error(r.status === 429 ? 'mojang rate limit' : 'mojang ' + r.status);
       const j = await r.json();
       const rec = { id: j.id.toLowerCase(), name: j.name, ts: Date.now() };
       this.uuidCache[key] = rec;
       writeJson('uuid-cache.json', this.uuidCache);
       return rec;
-    } catch (e) { return null; }
+    } catch (e) {
+      if (hit) return hit; // a stale cached answer beats none
+      throw e;
+    }
   }
 
   // UUID -> current name, for lookups typed as a UUID (e.g. in the Blacklist Admin window).

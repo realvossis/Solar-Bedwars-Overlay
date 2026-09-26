@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.2 — 2026-09-26
+
+### Added
+- **Nicked-player notification**: a popup + sound whenever a nicked player shows up in your lobby
+  (once per player per lobby; never for you or your party - add your own nicks under Settings ->
+  General -> Extra alias names so you aren't alerted about yourself). Toggle it like any other event.
+
+### Fixed
+- **Overlay and notifications hidden in F11 fullscreen.** A borderless-fullscreen game jumps above all
+  other always-on-top windows whenever it's activated. The overlay and popups now re-raise
+  themselves above it (without ever taking focus). Verified against a topmost fullscreen window
+  by reading the real window stacking order.
+- A Mojang lookup failure (timeout, rate limit) no longer marks a real player as nicked.
+
+(1.2.1 was replaced by this release; it contains everything from 1.2.1.)
+
 ## 1.2.1 — 2026-09-26
 
 ### Fixed

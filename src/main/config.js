@@ -203,7 +203,7 @@ function defaults() {
       events: {
         nickMatch: { popup: true, sound: true }, mention: { popup: true, sound: true }, dm: { popup: true, sound: true },
         partyInvite: { popup: true, sound: true }, friendRequest: { popup: true, sound: false },
-        threat: { popup: true, sound: true }, nameWatch: { popup: true, sound: true },
+        threat: { popup: true, sound: true }, nicked: { popup: true, sound: true }, nameWatch: { popup: true, sound: true },
       },
     },
 

@@ -14,6 +14,16 @@ const path = require('path');
 
 const WIDTH = 360, HEIGHT = 560, MARGIN = 14;
 
+// A borderless-fullscreen game (Minecraft on F11) is itself a topmost window, and whenever it's
+// activated it lands above every other topmost window - so a popup window created earlier ends up
+// hidden behind the game. Re-asserting topmost + moving to the top of the stack puts it back in
+// front WITHOUT activating it (both use SWP_NOACTIVATE), so the game keeps focus.
+function raiseInactive(win) {
+  if (!win || win.isDestroyed()) return;
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.moveTop();
+}
+
 // Event kinds and their Settings labels. Order = order shown in Settings.
 const EVENTS = {
   nickMatch: 'Nick roller found a matching name',
@@ -22,6 +32,7 @@ const EVENTS = {
   partyInvite: 'Party invite',
   friendRequest: 'Friend request',
   threat: 'Threat joins your lobby (blacklisted or high sniper score)',
+  nicked: 'Nicked player joins your lobby',
   nameWatch: 'Name Watch match',
 };
 
@@ -86,7 +97,7 @@ class Notifier {
       durationMs: Math.max(2, Math.min(30, Number(c.durationSec) || 7)) * 1000,
       volume: Math.max(0, Math.min(1, Number(c.volume ?? 0.6))),
     };
-    if (popup) { this._place(); if (!this.win.isVisible()) this.win.showInactive(); }
+    if (popup) { this._place(); if (!this.win.isVisible()) this.win.showInactive(); raiseInactive(this.win); }
     this.win.webContents.send('notify:show', payload);
     return popup ? id : null;
   }
@@ -102,9 +113,10 @@ class Notifier {
     this.notify({ kind: 'nickMatch', title: 'Nick found', text: 'Matches "Cat" - click USE NAME to take it.', player: 'LuckyCat7' });
     setTimeout(() => this.notify({ kind: 'mention', title: 'Mentioned you', text: 'gg vossis that was close', player: 'Recoverin', stats: demo('Recoverin', { star: 301, starColor: '#55ffff', fkdr: 6.8, wlr: 3.4, finals: 18000, ws: 9, sniper: { score: 74, label: 'DANGER', color: '#ff6b35' } }) }), 450);
     setTimeout(() => this.notify({ kind: 'threat', title: 'Threat in your lobby', text: 'Blacklisted: snipes in 4s', player: 'Sheplock', stats: demo('Sheplock', { star: 912, fkdr: 11.4, wlr: 6.2, finals: 52000, ws: 38, sniper: { score: 93, label: 'SNIPER', color: '#ff2d55' }, tags: [{ label: 'SNIPE', color: '#ff5b8a' }] }) }), 900);
+    setTimeout(() => this.notify({ kind: 'nicked', title: 'Nicked player in your lobby', text: 'Stats and blacklist tags are hidden behind the nick.', player: 'xX_Nicked_Xx', stats: { name: 'xX_Nicked_Xx', nicked: true } }), 1350);
   }
 
   destroy() { if (this.win && !this.win.isDestroyed()) this.win.destroy(); }
 }
 
-module.exports = { Notifier, EVENTS };
+module.exports = { Notifier, EVENTS, raiseInactive };

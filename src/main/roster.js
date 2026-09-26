@@ -106,7 +106,7 @@ class Roster extends EventEmitter {
     row.apiError = null; row.error = null; row.nicked = false;
     try {
       const resolved = await this.hy.resolveUuid(row.name);
-      if (!resolved) { row.loading = false; row.nicked = true; row.error = 'nicked'; this._emit(); return; }
+      if (!resolved) { row.loading = false; row.nicked = true; row.error = 'nicked'; this.emit('loaded', row); this._emit(); return; }
       row.uuid = resolved.id;
       row.name = resolved.name; // fix casing
       this._rematch(row, false); // case-sensitive regex rules may only match the real casing
