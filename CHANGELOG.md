@@ -4,7 +4,7 @@
 
 ### Fixed
 - **Every player in the Bedwars pre-game lobby was flagged as nicked.** Hypixel scrambles names in
-  pre-game join/quit messages (anti-sniping, e.g.  - verified in real
+  pre-game join/quit messages (anti-sniping, e.g. `VK2Gk4HS has joined (4/16)!` - verified in real
   logs), so each random name failed the account lookup. Those messages are now ignored in the pre-game
   lobby: players are added when they talk in chat (chat shows real names) and when the game starts and
   the real player list is revealed.
