@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.6 — 2026-09-26
+
+### Fixed
+- **Every player in the Bedwars pre-game lobby was flagged as nicked.** Hypixel scrambles names in
+  pre-game join/quit messages (anti-sniping, e.g.  - verified in real
+  logs), so each random name failed the account lookup. Those messages are now ignored in the pre-game
+  lobby: players are added when they talk in chat (chat shows real names) and when the game starts and
+  the real player list is revealed.
+- **Smarter nick detection.** Besides names with no Minecraft account at all, a real Minecraft account
+  that has never played on Hypixel - yet is in your lobby - is now recognised as a nick (that's what
+  Hypixel's nick names are). API errors or a missing key never count as a nick. The overlay tooltip
+  and the nick popup say why a player was flagged.
+
+(1.2.5 was replaced by this release; it contains everything from 1.2.5.)
+
 ## 1.2.5 — 2026-09-26
 
 ### Added

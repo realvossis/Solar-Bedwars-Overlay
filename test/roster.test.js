@@ -105,6 +105,31 @@ const settle = () => new Promise((r) => setTimeout(r, 30));
       assert.ok(!row.nicked); assert.match(row.error, /rate limit/); assert.strictEqual(loaded.length, 0);
     });
   })();
+  // Nick detection with a real Mojang account behind the name.
+  const ur = { lookup: async () => ({ tags: [], severity: 0 }), monthlyDelta: async () => null, winstreaks: async () => null };
+  const mk = (fetchPlayer) => new Roster({ resolveUuid: async (n) => ({ id: 'a'.repeat(32), name: n }), fetchPlayer, monthlyBaseline: () => null }, ur, () => ({ concurrency: 1 }));
+  await (async () => {
+    const r = mk(async () => null); // Hypixel: success, but no player record
+    r.addNames(['EzraMorales2003'], 'GAME'); await settle();
+    t('real Minecraft account that never played on Hypixel = nick', () => {
+      const row = r.players.get('ezramorales2003');
+      assert.strictEqual(row.nicked, true); assert.match(row.nickReason, /never played on Hypixel/);
+    });
+  })();
+  await (async () => {
+    const r = mk(async () => { const e = new Error('BAD_KEY'); e.code = 403; throw e; });
+    r.addNames(['SomePlayer'], 'GAME'); await settle();
+    t('no/bad API key proves nothing: not a nick', () => {
+      const row = r.players.get('someplayer');
+      assert.ok(!row.nicked); assert.strictEqual(row.apiError, 'bad key');
+    });
+  })();
+  await (async () => {
+    const r = mk(async () => ({ displayname: 'Regular', stats: { Bedwars: { Experience: 50000 } } }));
+    r.addNames(['Regular'], 'GAME'); await settle();
+    t('a normal Hypixel player is not a nick', () => { assert.ok(!r.players.get('regular').nicked); });
+  })();
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();

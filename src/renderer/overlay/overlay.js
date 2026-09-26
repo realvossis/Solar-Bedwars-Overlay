@@ -411,6 +411,7 @@ function showTip(e,row){
   let html = `<div class="row"><b>${esc(row.displayName||row.name)}</b></div>`;
   if(row.nicked){
     html += `<div class="row" style="color:#22d3ee"><b>Nicked — real identity unknown</b></div>`;
+    if(row.nickReason) html += `<div class="row dim">Why: ${esc(row.nickReason)}</div>`;
   }
   if(nw){
     html += `<div class="row" style="color:#bc8cff"><b>Name Watch:</b> ${esc(row.nameMatch.join(', '))}</div>`;

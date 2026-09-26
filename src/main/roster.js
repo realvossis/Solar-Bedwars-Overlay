@@ -103,10 +103,10 @@ class Roster extends EventEmitter {
     // Clear any flags from a previous failed attempt before trying again - otherwise a stale
     // "bad key"/"nicked" sticks around forever even after a fix (a new key, Mojang recovering
     // from a blip, ...) makes this attempt succeed, since nothing below ever un-sets them.
-    row.apiError = null; row.error = null; row.nicked = false;
+    row.apiError = null; row.error = null; row.nicked = false; row.nickReason = null;
     try {
       const resolved = await this.hy.resolveUuid(row.name);
-      if (!resolved) { row.loading = false; row.nicked = true; row.error = 'nicked'; this.emit('loaded', row); this._emit(); return; }
+      if (!resolved) { row.loading = false; row.nicked = true; row.error = 'nicked'; row.nickReason = 'no Minecraft account has this name'; this.emit('loaded', row); this._emit(); return; }
       row.uuid = resolved.id;
       row.name = resolved.name; // fix casing
       this._rematch(row, false); // case-sensitive regex rules may only match the real casing
@@ -133,6 +133,10 @@ class Roster extends EventEmitter {
       } else {
         row.stats = null;
         row.sniper = stats.sniperScore(null, { weights: cfg.sniperWeights, tagSeverity: urchin.severity || 0 });
+        // Hypixel answered successfully but has no player record: this account has never played on
+        // Hypixel - yet it's in your lobby. That's what Hypixel's nick names are (real, unused
+        // Minecraft accounts). An API error (bad key, rate limit, outage) proves nothing, so it isn't.
+        if (!row.apiError) { row.nicked = true; row.error = 'nicked'; row.nickReason = 'this account has never played on Hypixel'; }
       }
       row.loading = false;
       this.emit('loaded', row); // stats + tags are in: main checks it for threat alerts

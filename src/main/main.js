@@ -254,11 +254,16 @@ function wireWatcher() {
   // both require inBedwarsMatch() (your actual small match instance), not just "somewhere
   // Bedwars-flagged" - the shared matchmaking staging lobby is also gametype BEDWARS but is just
   // as noisy as the hub, see currentServer's comment above.
-  watcher.on('lobbyJoin', (n) => { if (inBedwarsMatch()) roster.addNames([n], 'GAME'); });
+  // Bedwars pre-game lobbies scramble names in join/quit messages (anti-sniping: "VK2Gk4HS has
+  // joined (4/16)!" - verified in real logs), and /who is refused there. Those names are random, so
+  // they're ignored: in the pre-game lobby players are added only when they talk in chat (chat shows
+  // real names), and everyone once the game starts and the real player list is revealed.
+  const scrambledJoins = () => currentGametype === 'BEDWARS' && !!currentMode && !inMatch;
+  watcher.on('lobbyJoin', (n) => { if (inBedwarsMatch() && !scrambledJoins()) roster.addNames([n], 'GAME'); });
   // Opt-in (see trackChatSpeakers in Settings) on top of that - some people still don't want
   // random match-lobby chatter added even once scoped correctly.
   watcher.on('chatSpeaker', (n) => { if (getConfig().trackChatSpeakers && inBedwarsMatch()) roster.addNames([n], 'GAME'); });
-  watcher.on('quit', (n) => roster.markLeft(n));
+  watcher.on('quit', (n) => { if (!scrambledJoins()) roster.markLeft(n); });
   // Housing fires its own serverChange twice in a row - once for the housing lobby, once more
   // for the actual house instance right after the teleport message names its owner - so a plain
   // clear-on-serverChange would wipe the owner right back out the moment they're added. Re-add
@@ -427,7 +432,7 @@ function checkNick(row) {
   const mine = [cfg.selfName, ...(cfg.reactNames || [])].map((n) => String(n || '').toLowerCase());
   if (mine.includes(row.key)) return;
   nicksAlerted.add(row.key);
-  notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
+  notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: row.nickReason ? 'Why: ' + row.nickReason + '.' : 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
 }
 
 // ---------------- chat warnings ----------------

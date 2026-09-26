@@ -1,6 +1,6 @@
 {
   "name": "solar-overlay",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Custom Hypixel Bedwars overlay (Cubelify-style) with Urchin blacklist integration, screen-capture hiding, and a self-hosted sniper/threat score.",
   "main": "src/main/main.js",
   "scripts": {
