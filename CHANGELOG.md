@@ -7,6 +7,13 @@
   overlay. Matches get a purple row, a ✦ badge and an optional toast. Includes `.txt` list import,
   live rule validation and a "test a name" box for checking nicks while rolling by hand.
 
+- **Nick roller** (`Alt+N`): with Hypixel's random-name book open, rerolls until the name meets your
+  requirements (length, no digits/underscores, your own text or `/regex/` rules, optionally your
+  Name Watch list), then stops with the book open for you to click USE NAME. Names are read by
+  matching against the real Minecraft font from your local 1.8.9 jar (exact at any GUI scale;
+  never guesses). Stops on hotkey, mouse movement, focus loss, missing book or roll limit, and only
+  ever clicks while Minecraft is focused. Overlay shows a 🎲 roll counter while running.
+
 ### Changed
 - Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.
 - IPC text inputs now accept strings only.

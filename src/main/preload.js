@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('solarBridge', {
   lookupName: (name) => invoke('lookup:name', name),
   checkNameRules: (rules, name) => invoke('nameRules:check', rules, name),
 
+  // nick roller (started/stopped in-game with Alt+N; the app can only watch and stop it)
+  nickRollerStatus: () => invoke('nickRoller:status'),
+  stopNickRoller: () => invoke('nickRoller:stop'),
+  checkNickRoller: (name) => invoke('nickRoller:check', name),
+  onNickRoller: (cb) => on('nickRoller:status', cb),
+
   // utils
   testKey: () => invoke('key:test'),
   pickLog: () => invoke('log:pick'),

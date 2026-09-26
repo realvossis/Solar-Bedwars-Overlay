@@ -12,6 +12,12 @@ const { Urchin } = require('./urchin');
 const { Roster } = require('./roster');
 const { LogWatcher, validName } = require('./logWatcher');
 const nameRules = require('./nameRules');
+const fs = require('fs');
+const { NickRoller, buildRequirements } = require('./nickRoller');
+const { WinHelper } = require('./winHelper');
+const { loadFont } = require('./bookReader');
+const { readEntry } = require('./zipReader');
+const png = require('./png');
 
 // ---------------- rendering pipeline ----------------
 // The overlay is a transparent, topmost window sitting directly over Minecraft's OpenGL surface.
@@ -23,7 +29,7 @@ const gpuAtLaunch = !!config.readEarly('gpuAcceleration', false);
 if (!gpuAtLaunch) app.disableHardwareAcceleration();
 
 let overlayWin = null, settingsWin = null, blacklistWin = null, splashWin = null, tray = null;
-let hypixel, urchin, roster, watcher;
+let hypixel, urchin, roster, watcher, nickRoller;
 let refreshTimer = null;
 let lastLogStatus = { ok: false, msg: 'not started' };
 // The last known raw server code (e.g. "mini116CN", "dynamiclobby25G", "limbo") - undefined until
@@ -269,6 +275,57 @@ function wireWatcher() {
   watcher.on('status', (s) => { lastLogStatus = s; broadcast('log:status', s); });
 }
 
+// ---------------- nick roller ----------------
+// The glyph shapes come from font/ascii.png inside the player's own Minecraft 1.8.9 jar - read at
+// runtime, never bundled (it's Mojang's asset).
+const FONT_ENTRY = 'assets/minecraft/textures/font/ascii.png';
+let glyphCache = null, glyphJar = null;
+function fontJarCandidates() {
+  const custom = String((getConfig().nickRoller || {}).jarPath || '').trim();
+  const mc = path.join(process.env.APPDATA || '', '.minecraft', 'versions');
+  return [custom && /\.jar$/i.test(custom) ? custom : null, ...['1.8.9', '1.8.8', '1.8'].map((v) => path.join(mc, v, v + '.jar'))].filter(Boolean);
+}
+function loadGlyphs() {
+  const jar = fontJarCandidates().find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } });
+  if (!jar) throw new Error('Minecraft 1.8.9 font not found. Launch 1.8.9 once with the official Minecraft launcher, or set the jar path in Settings → Nick Roller.');
+  if (glyphCache && glyphJar === jar) return glyphCache;
+  const buf = readEntry(jar, FONT_ENTRY);
+  if (!buf) throw new Error('That jar has no Minecraft font in it: ' + path.basename(jar));
+  glyphCache = loadFont(png.decode(buf)); glyphJar = jar;
+  return glyphCache;
+}
+
+function setupNickRoller() {
+  // Frames go through a file (a 1280x720 capture is ~3.7 MB - too big for a pipe per roll); it's a
+  // crop of your game screen, so it lives in the app's own folder and is deleted after each run.
+  const capPath = path.join(app.getPath('userData'), 'nickroll.frame');
+  const helper = new WinHelper(capPath);
+  nickRoller = new NickRoller({
+    helper, loadGlyphs, getConfig,
+    readFrame: (w, h) => {
+      const data = fs.readFileSync(capPath);
+      if (data.length !== w * h * 4) throw new Error('capture size mismatch');
+      for (let i = 0; i < data.length; i += 4) { const b = data[i]; data[i] = data[i + 2]; data[i + 2] = b; } // BGRA -> RGBA
+      return { width: w, height: h, data };
+    },
+  });
+  nickRoller.on('status', (s) => {
+    broadcast('nickRoller:status', s);
+    // While rolling, the overlay must neither show up in the captures nor catch the clicks.
+    if (overlayWin && s.running) { overlayWin.setContentProtection(true); overlayWin.setIgnoreMouseEvents(true, { forward: true }); }
+  });
+  nickRoller.on('done', ({ message, kind }) => {
+    applyCapture(); applyClickThrough(); // back to the user's own settings
+    helper.stop();
+    fs.rm(capPath, { force: true }, () => {});
+    toast(message, kind === 'match' ? 'warn' : kind === 'err' ? 'err' : 'info');
+  });
+}
+function toggleNickRoller() {
+  if (!nickRoller.running) toast('Nick roller started - move the mouse or press Alt+N to stop');
+  nickRoller.toggle();
+}
+
 // ---------------- refresh loop ----------------
 function applyRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
@@ -405,6 +462,18 @@ function registerIpc() {
     return { valid: compiled.rules.length, errors: compiled.errors, hits: nameRules.match(compiled, cleanText(name, 32)) };
   });
 
+  handle('nickRoller:status', () => nickRoller.state);
+  handle('nickRoller:stop', () => { nickRoller.stop('stopped from the app'); return true; });
+  // Settings' preview: are the requirements usable, would this name pass, and can we find the font?
+  handle('nickRoller:check', (_e, name) => {
+    const cfg = getConfig(), rc = cfg.nickRoller || {};
+    const req = buildRequirements(rc, rc.useNameWatch ? ((cfg.nameWatch || {}).rules || []) : []);
+    const n = cleanText(name, 32);
+    let font;
+    try { loadGlyphs(); font = { ok: true, jar: glyphJar }; } catch (e) { font = { ok: false, error: e.message }; }
+    return { empty: req.empty, errors: req.errors, result: n ? req.test(n) : null, font, platform: process.platform };
+  });
+
   handle('link:open', (_e, url) => openExternalSafe(url));
   handle('log:getStatus', () => lastLogStatus);
 }
@@ -465,6 +534,7 @@ function registerShortcuts() {
   bind('Alt+X', toggleClickThrough);
   bind('Alt+C', () => roster.clear());
   bind('Alt+S', openSettings);
+  bind('Alt+N', toggleNickRoller);
 }
 
 // ---------------- security baseline ----------------
@@ -504,6 +574,7 @@ if (!app.requestSingleInstanceLock()) {
     roster.on('update', (list) => broadcast('roster:update', list));
     roster.on('nameMatch', (row) => { if ((getConfig().nameWatch || {}).notify !== false) toast(`Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn'); });
     wireWatcher();
+    setupNickRoller();
     registerIpc();
     createSplash();
     createOverlay(); // stays hidden (show:false) until the splash reports done, see finishSplash()
@@ -518,5 +589,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
-  app.on('will-quit', () => globalShortcut.unregisterAll());
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } });
 }

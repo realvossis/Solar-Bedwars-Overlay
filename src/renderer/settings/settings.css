@@ -64,3 +64,4 @@ input[type=color]{width:38px;height:28px;border:1px solid var(--grid);border-rad
 .toast.err{border-left-color:#da3633}.toast.ok{border-left-color:#3fb950}
 @keyframes s{from{opacity:0;transform:translateX(12px)}to{opacity:1}}
 .hidden{display:none!important}
+.dim{color:var(--muted)}

@@ -42,6 +42,7 @@ html,body{width:100%;height:100%;background:transparent;overflow:hidden;
 .chip{border-radius:9px;padding:1px 7px;font-size:10.5px;font-weight:700;-webkit-app-region:no-drag;cursor:default}
 .chip.threat{background:rgba(255,45,85,.16);color:#ff5b7a}
 .chip.party{background:rgba(63,185,80,.14);color:#56d364}
+.chip.roll{background:rgba(188,140,255,.18);color:#d2b8ff;cursor:pointer;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .add{flex:1;-webkit-app-region:drag;display:flex;align-items:center}
 .add input{

@@ -35,6 +35,8 @@ system tray.
 | `Alt+X` | Toggle click-through (mouse passes to the game) |
 | `Alt+C` | Clear the player list |
 | `Alt+S` | Open settings |
+| `Alt+N` | Start / stop the nick roller |
+| `Alt+N` | Start / stop the nick roller |
 
 ---
 
@@ -124,13 +126,29 @@ Your own list of names or patterns, one per line, checked against every player o
 Plain text matches anywhere in a name, ignoring case (`Cat` matches *xXCatLover*). A regex goes
 between slashes (`/^[a-z]{3,4}$/i`). Lines starting with `#` are comments. Matching players get a
 purple row, a ✦ next to their name and, optionally, a toast. You can import a `.txt` word list,
-and a **Test a name** box shows instantly whether a name hits your list. That's handy for checking
-a nick while you roll one by hand.
+and a **Test a name** box shows instantly whether a name hits your list.
 
-> Why no automatic nick roller? Rolled nicks only appear inside Hypixel's nick book GUI and never
-> reach the log file the overlay reads. Automating the rolls would need an in-game mod (not possible
-> on Lunar) or an external program clicking for you, which is a macro under Hypixel's rules and
-> risks your account.
+### Nick roller (Settings → Nick Roller, `Alt+N`)
+Rerolls Hypixel's random nick until one fits your requirements. Type `/nick` → *I understand* →
+rank → skin → **Use a random name**, then with that page open and Minecraft focused press `Alt+N`.
+The overlay reads each rolled name off the screen, checks it, and clicks **TRY AGAIN** until one
+matches. It then stops with the book open, and picking **USE NAME** is your own click.
+
+- **Requirements:** min/max length, no digits, no underscores, plus your own rules (same syntax
+  as Name Watch, and you can reuse your Name Watch list). A name must pass every check and match at
+  least one rule, if you've written any.
+- **Accurate reading:** the name is read by matching every character against the real Minecraft
+  font from your own 1.8.9 jar. The font isn't bundled. Generic OCR misreads Minecraft's font
+  (M→H, 0→Ø). This matcher works at any GUI scale and refuses to guess: an unclear read stops the run.
+- **Safety stops:** it stops when you press `Alt+N` again, click the 🎲 chip, move the mouse,
+  switch away from Minecraft, when the book disappears, or when the roll limit is reached. It only
+  ever clicks while Minecraft is the focused window. The delay between rolls is configurable
+  (minimum 700 ms, with random jitter).
+- **Requirements to run:** Windows, and borderless or windowed mode (exclusive fullscreen can't be
+  captured). A Minecraft 1.8.9 jar must be present; it's found automatically in `.minecraft`, or you
+  can set the path.
+
+> Automating the nick book is a grey area under Hypixel's rules. Use it at your own discretion.
 
 ### Auto-triggers (Settings → Triggers)
 Auto-flag players to your local watchlist when they: **say your name in chat**, **join your party**,
@@ -188,6 +206,11 @@ solar-overlay/
    │  ├─ urchin.js             # Urchin + Connections + local blacklist merge + admin add-tag
    │  ├─ logWatcher.js         # tails the client log, parses chat + party events
    │  ├─ net.js                # request timeouts + https-only endpoint guard
+   │  ├─ nameRules.js          # Name Watch / nick rule parsing + matching
+   │  ├─ nickRoller.js         # nick roller loop + requirements
+   │  ├─ bookReader.js         # reads the rolled name off a screen capture (font matching)
+   │  ├─ winHelper.js          # Windows capture/click helper (PowerShell + C#)
+   │  ├─ zipReader.js, png.js  # read the font out of the Minecraft jar, no dependencies
    │  ├─ roster.js             # combines everything into the live player list
    │  └─ preload.js            # secure IPC bridge
    └─ renderer/

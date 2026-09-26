@@ -152,6 +152,7 @@ const TABS = {
   'Log & Detection': panelLog,
   Triggers: panelTriggers,
   'Name Watch': panelNameWatch,
+  'Nick Roller': panelNickRoller,
   'API Keys': panelApi,
   Connections: panelConnections,
   Appearance: panelAppearance,
@@ -260,6 +261,72 @@ function panelNameWatch(p) {
   const testRow = el('div'); testRow.style.cssText = 'display:flex;align-items:center';
   testRow.appendChild(testIn); testRow.appendChild(testOut);
   p.appendChild(fieldRow('Test a name', 'Rolling a nick by hand? Paste it here to see instantly if it hits your list.', testRow));
+  refresh();
+}
+
+function panelNickRoller(p) {
+  p.appendChild(header('Nick Roller', 'Rerolls Hypixel\'s random nick until one fits your requirements, then stops with the book open so you can click USE NAME yourself.'));
+  const how = el('div', 'kv');
+  how.style.lineHeight = '1.8';
+  how.innerHTML = '<b>How to use:</b> in game type <span class="pill">/nick</span> → I understand → pick a rank → pick a skin → <b>Use a random name</b>. ' +
+    'With that page open and Minecraft focused, press <span class="pill">Alt+N</span>. Press Alt+N again, click the 🎲 chip, or just move your mouse to stop.<br>' +
+    'Needs borderless or windowed mode (exclusive fullscreen can\'t be captured). The overlay hides itself from the captures while rolling.';
+  p.appendChild(how);
+  const statusBox = el('div', 'kv'); statusBox.style.margin = '8px 0';
+  p.appendChild(statusBox);
+
+  p.appendChild(header('Requirements', 'A rolled name is taken when it passes every check below AND matches at least one of your rules (if you have any).'));
+  p.appendChild(fieldRow('Min length', '0 = any', number('nickRoller.minLength', 0, 16, 1)));
+  p.appendChild(fieldRow('Max length', '16 = any', number('nickRoller.maxLength', 3, 16, 1)));
+  p.appendChild(fieldRow('No digits', '', toggle('nickRoller.noDigits')));
+  p.appendChild(fieldRow('No underscores', '', toggle('nickRoller.noUnderscore')));
+  p.appendChild(fieldRow('Also accept my Name Watch list', 'Use the rules from the Name Watch tab too.', toggle('nickRoller.useNameWatch')));
+
+  const ta = el('textarea');
+  ta.spellcheck = false;
+  ta.style.cssText = 'width:100%;height:120px;margin-top:6px;font-family:Consolas,monospace;font-size:12px;box-sizing:border-box';
+  ta.placeholder = 'One rule per line - same syntax as Name Watch:\nCat\n/^[A-Z][a-z]{3,6}$/';
+  ta.value = ((cfg.nickRoller || {}).rules || []).join('\n');
+  const splitLines = (text) => String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  p.appendChild(fieldRow('Rules', 'Plain text = contains (any case). /regex/ for anything fancier.', el('div')));
+  p.appendChild(ta);
+
+  const testIn = el('input'); testIn.type = 'text'; testIn.placeholder = 'try a name'; testIn.maxLength = 32; testIn.style.width = '200px';
+  const testOut = el('span'); testOut.style.cssText = 'margin-left:10px;font-size:12px';
+  const reqStatus = el('div', 'kv'); reqStatus.style.marginTop = '6px';
+  async function refresh() {
+    const r = await api.checkNickRoller(testIn.value.trim());
+    reqStatus.innerHTML = (r.platform !== 'win32' ? '<div class="bad">The nick roller only works on Windows.</div>' : '') +
+      (r.font.ok ? `<div class="ok">✓ Minecraft font found (${esc(r.font.jar)})</div>` : `<div class="bad">✕ ${esc(r.font.error)}</div>`) +
+      (r.empty ? '<div class="bad">✕ No requirements yet - add a rule or enable a check.</div>' : '<div class="ok">✓ Requirements set</div>') +
+      r.errors.map((e) => `<div class="bad">✕ ${esc(e.source)} — ${esc(e.error)}</div>`).join('');
+    if (!r.result) testOut.textContent = '';
+    else if (r.result.ok) testOut.innerHTML = '<span class="ok">✓ would stop here</span>';
+    else testOut.innerHTML = `<span class="bad">✕ ${esc(r.result.why)}</span>`;
+  }
+  ta.onchange = async () => { await set('nickRoller.rules', splitLines(ta.value)); refresh(); };
+  testIn.oninput = refresh;
+  const testRow = el('div'); testRow.style.cssText = 'display:flex;align-items:center'; testRow.appendChild(testIn); testRow.appendChild(testOut);
+  p.appendChild(fieldRow('Test a name', '', testRow));
+  p.appendChild(reqStatus);
+  // Re-check after any toggle/number on this tab changes.
+  p.addEventListener('change', () => setTimeout(refresh, 80));
+
+  p.appendChild(header('Pacing & safety', ''));
+  p.appendChild(fieldRow('Delay between rolls (ms)', 'Minimum 700. A small random extra is added so rolls aren\'t perfectly regular.', number('nickRoller.delayMs', 700, 10000, 100)));
+  p.appendChild(fieldRow('Max rolls per run', '', number('nickRoller.maxRolls', 1, 5000, 10)));
+  p.appendChild(fieldRow('Minecraft 1.8.9 jar (optional)', 'Only if the font isn\'t found automatically.', text('nickRoller.jarPath', '...\\.minecraft\\versions\\1.8.9\\1.8.9.jar', true)));
+
+  const hist = el('div', 'kv'); hist.style.cssText = 'margin-top:10px;font-family:Consolas,monospace;font-size:11.5px;line-height:1.6';
+  p.appendChild(header('Last run', '')); p.appendChild(hist);
+  const show = (s) => {
+    statusBox.innerHTML = s.running
+      ? `<span class="ok">● Rolling…</span> ${s.rolls} rolls${s.last ? ' · last: <b>' + esc(s.last) + '</b>' : ''}`
+      : `<span class="dim">Idle.</span> ${esc(s.message && s.message !== 'idle' ? s.message : '')}`;
+    hist.innerHTML = (s.history || []).slice().reverse().map((h) => `<div class="${h.match ? 'ok' : ''}">${h.match ? '✓' : '·'} ${esc(h.name)}</div>`).join('') || '<span class="dim">No rolls yet.</span>';
+  };
+  api.nickRollerStatus().then(show);
+  const off = api.onNickRoller((s) => { if (document.body.contains(hist)) show(s); else off(); });
   refresh();
 }
 
@@ -614,7 +681,8 @@ function panelAbout(p) {
       <span class="pill">Alt+B</span> show/hide overlay &nbsp;
       <span class="pill">Alt+X</span> click-through &nbsp;
       <span class="pill">Alt+C</span> clear list &nbsp;
-      <span class="pill">Alt+S</span> settings<br>
+      <span class="pill">Alt+S</span> settings &nbsp;
+      <span class="pill">Alt+N</span> start/stop nick roller<br>
       Right-click a column header → toggle columns. Drag headers to reorder. Click header to sort.<br>
       Right-click a player row → Plancke, NameMC, copy, local tag, watchlist, remove.<br>
       Party members are picked up automatically (invites, joins, party chat, summons, /p list) — no need to run /p list.<br>

@@ -516,6 +516,13 @@ async function init(){
   $('#btnClose').onclick=()=>api.quit();
   $('#btnClick').onclick=async ()=>{ await api.setClickThrough(!cfg.clickThrough); cfg.clickThrough=!cfg.clickThrough; $('#btnClick').classList.toggle('on',cfg.clickThrough); };
 
+  const roll=$('#rollChip');
+  roll.onclick=()=>api.stopNickRoller();
+  api.onNickRoller((s)=>{
+    roll.classList.toggle('hidden', !s.running);
+    roll.textContent = '\u{1F3B2} ' + s.rolls + (s.last ? ' · ' + s.last : '');
+  });
+
   const inp=$('#addInput');
   inp.onkeydown=(e)=>{ if(e.key==='Enter'&&inp.value.trim()){ api.addPlayer(inp.value.trim()); inp.value=''; } };
 }
