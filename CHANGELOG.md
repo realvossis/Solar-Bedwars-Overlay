@@ -27,7 +27,10 @@
 - UI refresh: one consistent SVG icon set across all windows, a calmer overlay (compact
   locale-independent numbers, right-aligned stats, subtler row states, icon-only Source/Tag
   columns), and card-based Settings with sidebar icons.
-- New minimal launch splash (about 2.6s instead of 5.5s). It no longer takes focus when it appears.
+- New launch animation (about 6s): a nebula and a spiral galaxy condensing from stardust, its core igniting
+  into the Solar sun (flash, shockwave, flare), planets swinging onto their orbits, and a hyperspace-warp
+  exit. Drawn on a canvas tuned for CPU rendering (runs at the monitor refresh rate, automatically
+  thins particles on slow machines, respects reduced motion). It no longer takes focus when it appears.
 - Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.
 - IPC text inputs now accept strings only.
 

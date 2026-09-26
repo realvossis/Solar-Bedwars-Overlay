@@ -83,12 +83,12 @@ function createOverlay() {
   overlayWin.on('closed', () => { overlayWin = null; });
 }
 
-// A short, one-time-per-launch title card. It owns its own ~2.6s timing (see splash.js) and
+// A one-time-per-launch title animation. It owns its own ~6s timing (see splash.js) and
 // reports back over IPC when it's done rather than main.js guessing a delay. Non-focusable and
 // shown inactive: launching the app while in a game must never pull focus out of it.
 function createSplash() {
   splashWin = new BrowserWindow({
-    width: 420, height: 260, frame: false, transparent: true, resizable: false, movable: false,
+    width: 640, height: 400, frame: false, transparent: true, resizable: false, movable: false,
     fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#00000000',
     hasShadow: false, show: false, center: true, focusable: false,
     icon: ICON,
