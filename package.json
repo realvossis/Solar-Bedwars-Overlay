@@ -1,6 +1,6 @@
 {
   "name": "solar-overlay",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Custom Hypixel Bedwars overlay (Cubelify-style) with Urchin blacklist integration, screen-capture hiding, and a self-hosted sniper/threat score.",
   "main": "src/main/main.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "test": "node test/run.js",
     "dist": "electron-builder --win"
   },
-  "author": "Nath (realvossis)",
+  "author": "vossis",
   "repository": {
     "type": "git",
     "url": "https://github.com/realvossis/Solar-Bedwars-Overlay.git"
@@ -51,6 +51,7 @@
       "enableNodeCliInspectArguments": false,
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true
-    }
+    },
+    "copyright": "Copyright © 2026 vossis"
   }
 }

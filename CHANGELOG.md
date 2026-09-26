@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.7 — 2026-09-26
+
+### Changed
+- Publisher / company / copyright in the app and installer now read **vossis**.
+
+(1.2.6 was replaced by this release; it contains everything from 1.2.6.)
+
 ## 1.2.6 — 2026-09-26
 
 ### Fixed
