@@ -235,7 +235,8 @@ function panelNotifications(p) {
   p.appendChild(fieldRow('Threat alert: sniper score from', 'Also alerts for anyone blacklisted, regardless of score.', number('notifications.threatMinSniper', 20, 100, 5)));
   const test = el('button', 'ghost'); test.textContent = 'Send test notifications';
   test.onclick = () => api.previewNotification();
-  p.appendChild(fieldRow('Preview', 'Shows three sample popups with sound.', test));
+  p.appendChild(fieldRow('Preview', 'Shows sample popups with sound.', test));
+  p.appendChild(fieldRow('Test inside your game', 'Press Alt+T while playing (e.g. in F11 fullscreen): shows a test popup and records how Windows stacks the game and Solar\'s windows, so visibility problems can be pinned down.', el('span')));
 
   p.appendChild(header('Events', 'Choose, per event, whether it shows a popup and/or plays a sound. With the popup off, you still get the small toast inside the overlay.'));
   const grid = el('div', 'evgrid');
@@ -744,7 +745,8 @@ function panelAbout(p) {
       <span class="pill">Alt+X</span> click-through &nbsp;
       <span class="pill">Alt+C</span> clear list &nbsp;
       <span class="pill">Alt+S</span> settings &nbsp;
-      <span class="pill">Alt+N</span> start/stop nick roller<br>
+      <span class="pill">Alt+N</span> start/stop nick roller &nbsp;
+      <span class="pill">Alt+T</span> test notification in-game<br>
       Right-click a column header → toggle columns. Drag headers to reorder. Click header to sort.<br>
       Right-click a player row → Plancke, NameMC, copy, local tag, watchlist, remove.<br>
       Party members are picked up automatically (invites, joins, party chat, summons, /p list) — no need to run /p list.<br>

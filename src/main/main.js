@@ -364,6 +364,41 @@ function checkNick(row) {
   notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
 }
 
+// ---------------- in-game visibility check (Alt+T) ----------------
+// Press it while in your game: shows a test popup, then samples the real window stacking order and
+// the game window's fullscreen state for ~2.5s and appends the result to diagnostics.log in the
+// app's data folder - hard evidence for why a popup can't be seen over a particular game setup.
+function hwndOf(win) {
+  try { const b = win.getNativeWindowHandle(); return b.length >= 8 ? b.readBigUInt64LE(0).toString() : String(b.readUInt32LE(0)); } catch (_) { return '0'; }
+}
+let visibilityCheckRunning = false;
+async function visibilityCheck() {
+  if (visibilityCheckRunning || process.platform !== 'win32') return;
+  if (nickRoller && nickRoller.running) { toast('Stop the nick roller first'); return; }
+  visibilityCheckRunning = true;
+  const helper = nickRoller.d.helper;
+  try {
+    await notifier.notify({ kind: 'test', force: true, title: 'Test notification', text: 'Can you read this over your game? Checking how Windows stacks the windows right now…' });
+    await helper.start();
+    const samples = [];
+    for (let i = 0; i < 12; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      samples.push({ t: i * 200, ...(await helper.diag(overlayWin ? hwndOf(overlayWin) : 0, notifier.window ? hwndOf(notifier.window) : 0)) });
+    }
+    const valid = samples.filter((s) => !s.error);
+    const above = valid.filter((s) => s.popupZ > 0 && s.popupZ < s.fgZ).length;
+    const first = valid[0] || {};
+    const record = { at: new Date().toISOString(), version: app.getVersion(), samples };
+    fs.appendFileSync(path.join(app.getPath('userData'), 'diagnostics.log'), JSON.stringify(record) + '\n');
+    toast(`Visibility check: popup above "${first.fgProcess || '?'}" in ${above}/${valid.length} samples (fullscreen state ${first.fullscreenState}, game topmost: ${first.fgTopmost ? 'yes' : 'no'}). Saved to diagnostics.log`, above === valid.length ? 'info' : 'warn');
+  } catch (e) {
+    toast('Visibility check failed: ' + String(e.message || e), 'err');
+  } finally {
+    helper.stop();
+    visibilityCheckRunning = false;
+  }
+}
+
 // ---------------- nick roller ----------------
 // The glyph shapes come from font/ascii.png inside the player's own Minecraft 1.8.9 jar - read at
 // runtime, never bundled (it's Mojang's asset).
@@ -630,6 +665,7 @@ function registerShortcuts() {
   bind('Alt+C', () => roster.clear());
   bind('Alt+S', openSettings);
   bind('Alt+N', toggleNickRoller);
+  bind('Alt+T', visibilityCheck);
 }
 
 // ---------------- security baseline ----------------
@@ -688,11 +724,15 @@ if (!app.requestSingleInstanceLock()) {
     // Stay-on-top watchdog: a borderless-fullscreen game (F11) jumps above all topmost windows each
     // time it's activated, hiding the overlay and popups behind it. Re-raise whatever of ours is
     // visible, never activating it (see raiseInactive), so the game keeps focus.
+    // Popups are re-raised every 250ms while one is on screen (they're short-lived and must be seen);
+    // the overlay every 1.5s.
+    let tick = 0;
     setInterval(() => {
-      if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible() && getConfig().alwaysOnTop) raiseInactive(overlayWin);
       const nw = notifier && notifier.window;
       if (nw && !nw.isDestroyed() && nw.isVisible()) raiseInactive(nw);
-    }, 1500);
+      if (++tick % 6) return;
+      if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible() && getConfig().alwaysOnTop) raiseInactive(overlayWin);
+    }, 250);
 
     app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
   });

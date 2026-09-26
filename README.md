@@ -36,6 +36,7 @@ system tray.
 | `Alt+C` | Clear the player list |
 | `Alt+S` | Open settings |
 | `Alt+N` | Start / stop the nick roller |
+| `Alt+T` | Test notification in-game (+ visibility diagnostics) |
 | `Alt+N` | Start / stop the nick roller |
 
 ---

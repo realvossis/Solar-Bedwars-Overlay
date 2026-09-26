@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.3 — 2026-09-26
+
+### Fixed
+- **Mentions from players with a lobby star prefix were missed.** Bedwars lobby chat can show the star
+  level in guillemets before the rank (`«2188❁» [MVP++] Name: …`), which the chat parser didn't
+  accept, so neither the mention alert nor chat tracking saw those lines. Replaying a real log: 18
+  more chat lines recognised, including the missed mention.
+- Extra alias names typed with dots or spaces ("vossis. voss") are now split into separate aliases
+  instead of being silently ignored.
+- Mouse paths for the nick roller could end on a rounded duplicate point instead of exactly on the
+  target (found by the randomized test).
+
+### Added
+- **Alt+T in-game visibility check:** shows a test notification and records how Windows stacks your
+  game and Solar's windows (fullscreen state, topmost, stacking order) to `diagnostics.log` in the
+  app's data folder, to pin down cases where popups can't be seen over a particular fullscreen setup.
+- Open popups are re-raised above a fullscreen game every 250 ms (was 1.5 s).
+
+(1.2.2 was replaced by this release; it contains everything from 1.2.2.)
+
 ## 1.2.2 — 2026-09-26
 
 ### Added

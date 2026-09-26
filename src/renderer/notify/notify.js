@@ -14,6 +14,7 @@ const KINDS = {
   friendRequest: { color: '#3ddc97', icon: 'userPlus' },
   threat:        { color: '#f85149', icon: 'alert' },
   nicked:        { color: '#22d3ee', icon: 'eye' },
+  test:          { color: '#58a6ff', icon: 'bell' },
   nameWatch:     { color: '#bc8cff', icon: 'sparkle' },
 };
 const RANKCOLOR = { SUPERSTAR: '#ffaa00', MVP_PLUS: '#55ffff', MVP: '#55ffff', VIP_PLUS: '#55ff55', VIP: '#55ff55', YOUTUBER: '#ff5555', ADMIN: '#ff5555' };
@@ -44,6 +45,7 @@ const SOUNDS = {
   nameWatch: (v) => { tone(1319, 0, 0.25, v * 0.35); tone(1976, 0.09, 0.4, v * 0.3); },
   nicked:    (v) => { tone(740, 0, 0.18, v * 0.4, 'triangle'); tone(554, 0.12, 0.3, v * 0.4, 'triangle'); },
 };
+SOUNDS.test = SOUNDS.mention;
 function play(kind, volume) {
   try {
     if (!ctx) ctx = new AudioContext();

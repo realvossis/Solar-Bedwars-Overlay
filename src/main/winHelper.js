@@ -1,6 +1,6 @@
 'use strict';
 // A tiny Windows-only helper for the nick roller: one long-lived PowerShell process hosting a
-// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly five things:
+// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly six things (all read-only except click/path):
 //   fg                   -> the foreground window's handle, process name and client-area rect
 //   cap x y w h          -> screenshot of that screen rectangle, written as raw BGRA to the file
 //                           path fixed at startup (big frames don't belong on a pipe)
@@ -8,6 +8,7 @@
 //                           roll can never click into some other app you alt-tabbed to
 //   path hwnd dt x y ... -> glide the mouse through up to 400 points, dt ms apart (same focus rule)
 //   cursor               -> current mouse position (to notice you taking the mouse back)
+//   diag a b             -> stacking order + fullscreen state, for the Alt+T visibility check
 // All arguments are integers parsed and range-checked on the C# side; nothing from the user or
 // the log is ever interpolated into the script. No npm/native dependencies: the C# is compiled
 // once at startup with the .NET Framework that ships with Windows.
@@ -78,6 +79,36 @@ public static class SolarHelper {
     }
     return "ok";
   }
+  // Read-only diagnostics for "why can't I see the popup over my game": stacking position of the
+  // foreground window and of two of our windows (a, b), plus the foreground window's style and
+  // Windows' own fullscreen state (SHQueryUserNotificationState).
+  [DllImport("user32.dll")] static extern IntPtr GetTopWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint f);
+  [StructLayout(LayoutKind.Sequential)] struct MONINFO { public int cb; public RECT mon, work; public uint flags; }
+  [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr m, ref MONINFO i);
+  [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int s);
+  public static string Diag(long a, long b) {
+    IntPtr fg = GetForegroundWindow();
+    int pos = 0, pf = -1, pa = -1, pb = -1;
+    for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, 2)) {
+      if (!IsWindowVisible(h)) continue; pos++;
+      if (h == fg && pf < 0) pf = pos;
+      if (h.ToInt64() == a && pa < 0) pa = pos;
+      if (h.ToInt64() == b && pb < 0) pb = pos;
+    }
+    int ex = GetWindowLong(fg, -20), st = GetWindowLong(fg, -16);
+    RECT r; GetWindowRect(fg, out r);
+    MONINFO mi = new MONINFO(); mi.cb = Marshal.SizeOf(typeof(MONINFO)); GetMonitorInfo(MonitorFromWindow(fg, 2), ref mi);
+    bool covers = r.L <= mi.mon.L && r.T <= mi.mon.T && r.R >= mi.mon.R && r.B >= mi.mon.B;
+    int q = 0; SHQueryUserNotificationState(out q);
+    uint pid; GetWindowThreadProcessId(fg, out pid); string pn = "";
+    try { pn = Process.GetProcessById((int)pid).ProcessName; } catch { }
+    return "ok " + pf + " " + pa + " " + pb + " " + ((ex & 0x8) != 0 ? 1 : 0) + " " + ((st & unchecked((int)0x80000000)) != 0 ? 1 : 0) + " " + (covers ? 1 : 0) + " " + q + " " + Convert.ToBase64String(Encoding.UTF8.GetBytes(pn));
+  }
   public static string Cursor() { POINT p; GetCursorPos(out p); return "ok " + p.X + " " + p.Y; }
 }
 '@
@@ -98,6 +129,7 @@ while ($true) {
     elseif ($a[0] -eq 'cursor' -and $n.Count -eq 0) { $out = [SolarHelper]::Cursor() }
     elseif ($a[0] -eq 'cap' -and $n.Count -eq 4 -and (& $coordOk $n) -and $n[2] -gt 0 -and $n[3] -gt 0 -and $n[2] * $n[3] -le 40000000) { $out = [SolarHelper]::Cap($n[0], $n[1], $n[2], $n[3], $capPath) }
     elseif ($a[0] -eq 'click' -and $n.Count -eq 3 -and (& $coordOk $n[0..1]) -and $n[2] -gt 0) { $out = [SolarHelper]::Click($n[0], $n[1], $n[2]) }
+    elseif ($a[0] -eq 'diag' -and $n.Count -eq 2 -and $n[0] -ge 0 -and $n[1] -ge 0) { $out = [SolarHelper]::Diag($n[0], $n[1]) }
     elseif ($a[0] -eq 'path' -and $n.Count -ge 4 -and $n.Count -le 802 -and ($n.Count % 2) -eq 0 -and $n[0] -gt 0 -and $n[1] -ge 1 -and $n[1] -le 50 -and (& $coordOk $n[2..($n.Count - 1)])) {
       $out = [SolarHelper]::Path($n[0], [int]$n[1], [long[]]$n[2..($n.Count - 1)])
     }
@@ -170,6 +202,13 @@ class WinHelper {
     const pts = points.slice(0, 400).map((p) => `${p.x | 0} ${p.y | 0}`).join(' ');
     const r = await this.request(`path ${String(hwnd).replace(/\D/g, '')} ${Math.max(1, Math.min(50, dt | 0))} ${pts}`, points.length * dt + 3000);
     return r === 'ok';
+  }
+
+  // Stacking/fullscreen snapshot (see Diag in the C# above). a/b are our window handles.
+  async diag(a, b) {
+    const r = (await this.request(`diag ${String(a || 0).replace(/\D/g, '') || 0} ${String(b || 0).replace(/\D/g, '') || 0}`)).split(' ');
+    if (r[0] !== 'ok') return { error: r.join(' ') };
+    return { fgZ: +r[1], overlayZ: +r[2], popupZ: +r[3], fgTopmost: r[4] === '1', fgPopupStyle: r[5] === '1', fgCoversMonitor: r[6] === '1', fullscreenState: +r[7], fgProcess: Buffer.from(r[8] || '', 'base64').toString('utf8') };
   }
 
   async cursor() { const r = (await this.request('cursor')).split(' '); return { x: +r[1], y: +r[2] }; }

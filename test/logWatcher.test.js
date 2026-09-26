@@ -111,7 +111,19 @@ t('final kills no longer emit killedYou', () => {
 // ---- mentions ----
 t('mention on whole-word match', () => assert.strictEqual(only(run(['[VIP] Bob: gg me'], ['Me']), 'mention').length, 1));
 t('no mention on substring match', () => assert.strictEqual(only(run(['[VIP] Bob: welcome home'], ['Me']), 'mention').length, 0));
-t('no mention for your own messages', () => assert.strictEqual(only(run(['[VIP] Me: me me'], ['Me']), 'mention').length, 0));
+// Exact raw shape from a real Lunar log (Latin-1 decoded, colour codes intact, names anonymised):
+// Bedwars lobby chat puts the star level in guillemets before the rank.
+const STAR_LINE = '§f«2§e18§68?»§r §b[MVP§1++§b] Friend_1§f: Me ?(^?^*)/';
+t('mention with a «star» lobby prefix (was missed)', () => {
+  assert.deepStrictEqual(only(run([STAR_LINE]), 'mention').map((e) => e[1].by), ['Friend_1']);
+});
+t('«star» prefix speakers count as chat speakers', () => {
+  assert.deepStrictEqual(only(run(['«316?» [VIP] Someone: gl']), 'chatSpeaker'), [['chatSpeaker', 'Someone']]);
+});
+t('aliases typed with dots/spaces still work ("vossis. voss")', () => {
+  assert.strictEqual(only(run(['[VIP] Bob: gg voss'], ['vossis. voss']), 'mention').length, 1);
+});
+t('no mention for your own messages',() => assert.strictEqual(only(run(['[VIP] Me: me me'], ['Me']), 'mention').length, 0));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

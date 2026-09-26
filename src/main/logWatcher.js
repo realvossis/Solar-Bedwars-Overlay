@@ -50,6 +50,10 @@ function chatOf(line) {
 function validName(n) { return /^[A-Za-z0-9_]{1,16}$/.test(n); }
 // Zero or more "[RANK] " prefixes in front of a name.
 const RANKS = '(?:\\[[^\\]]+\\]\\s*)*';
+// Chat-only prefixes in front of the rank: besides "[316✫]"-style brackets, Bedwars lobbies show the
+// star level in guillemets, e.g. "«2188❁» [MVP++] Name: hi" (the symbol arrives as "?" after the
+// log's Latin-1 decoding). Missing this format is what made mentions from those players vanish.
+const CHAT_PREFIX = '(?:(?:\\[[^\\]]+\\]|«[^»]{0,24}»)\\s*)*';
 // Every party/social pattern below is anchored at the start of the message. Player chat always
 // starts with the sender's own "[RANK] Name: ", so anchoring is what stops someone from typing
 // "Bob joined the party" in public chat and getting Bob treated as your party member.
@@ -99,7 +103,8 @@ class LogWatcher extends EventEmitter {
   }
 
   setSelfNames(names) {
-    this.selfNames = (names || []).filter(Boolean).map((n) => String(n).trim().toLowerCase()).filter(validName);
+    // Split on anything that can't be part of a name, so "vossis. voss" or "a; b" still yields both.
+    this.selfNames = (names || []).flatMap((n) => String(n || '').split(/[^A-Za-z0-9_]+/)).map((n) => n.toLowerCase()).filter(validName);
     // Whole-word match, so an IGN like "Ace" isn't "mentioned" by every "race"/"face" in chat.
     this._selfRe = this.selfNames.length ? new RegExp('(?:^|[^a-z0-9_])(?:' + this.selfNames.map(escapeRe).join('|') + ')(?![a-z0-9_])', 'i') : null;
   }
@@ -263,7 +268,7 @@ class LogWatcher extends EventEmitter {
     // which are ever chat-tagged) can't be mistaken for someone named "OpenGL" talking. ----
     const hasChannelPrefix = CHANNEL_PREFIX.test(msg);
     const body = msg.replace(CHANNEL_PREFIX, '');
-    const cm = isChatLine && body.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')(?:\\s*\\[[^\\]]+\\])*\\s*:\\s*(.*)$'));
+    const cm = isChatLine && body.match(new RegExp('^' + CHAT_PREFIX + '(' + NAME + ')(?:\\s*\\[[^\\]]+\\])*\\s*:\\s*(.*)$'));
     if (cm) {
       if (!hasChannelPrefix) this.emit('chatSpeaker', cm[1]);
       // Anyone talking in party chat is, by definition, in your party right now - the most common

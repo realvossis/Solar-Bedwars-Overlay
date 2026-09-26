@@ -81,11 +81,12 @@ class Notifier {
 
   // Shows (and/or plays) a notification if the user has that event enabled. Returns the id when a
   // popup was shown, or null - callers fall back to the overlay's own toast in that case.
-  async notify({ kind, title, text, player, stats }) {
+  // force: always show + sound (the Alt+T visibility test), regardless of per-event switches.
+  async notify({ kind, title, text, player, stats, force = false }) {
     const c = this._cfg();
     const ev = (c.events || {})[kind] || {};
-    const popup = c.enabled !== false && ev.popup !== false;
-    const sound = c.enabled !== false && c.sound !== false && ev.sound !== false;
+    const popup = force || (c.enabled !== false && ev.popup !== false);
+    const sound = force || (c.enabled !== false && c.sound !== false && ev.sound !== false);
     if (!popup && !sound) return null;
     await this._ensureWindow();
     if (!this.win) return null;

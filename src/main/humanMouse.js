@@ -78,9 +78,11 @@ function planPath(from, to, { minMs = 180, maxMs = 420, rand = Math.random } = {
       points.push({ x: Math.round(lerp(last.x, to.x, t)), y: Math.round(lerp(last.y, to.y, t)) });
     }
   }
-  points[points.length - 1] = { x: to.x, y: to.y };
-  // Drop consecutive duplicates (they'd just be dead time).
-  return { dt, points: points.filter((p, i) => i === 0 || p.x !== points[i - 1].x || p.y !== points[i - 1].y) };
+  // Drop consecutive duplicates (they'd just be dead time), then pin the end exactly on the target -
+  // after de-duplication, so it can never be swapped for an earlier, merely-equal rounded point.
+  const out = points.filter((p, i) => i === 0 || p.x !== points[i - 1].x || p.y !== points[i - 1].y);
+  out[out.length - 1] = { x: to.x, y: to.y };
+  return { dt, points: out };
 }
 
 // A short, random hesitation between arriving on the link and clicking it.
