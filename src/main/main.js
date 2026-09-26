@@ -92,7 +92,8 @@ function createSplash() {
     fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#00000000',
     hasShadow: false, show: false, center: true, focusable: false,
     icon: ICON,
-    webPreferences: SECURE_PREFS,
+    // The startup soundtrack plays without a click (the window can't even be clicked into).
+    webPreferences: { ...SECURE_PREFS, autoplayPolicy: 'no-user-gesture-required' },
   });
   splashWin.once('ready-to-show', () => splashWin.showInactive());
   splashWin.loadFile(path.join(__dirname, '..', 'renderer', 'splash', 'splash.html'));

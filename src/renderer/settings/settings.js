@@ -229,7 +229,8 @@ function panelNotifications(p) {
   ])));
   p.appendChild(fieldRow('Show for (seconds)', '', number('notifications.durationSec', 2, 30, 1)));
   p.appendChild(fieldRow('Sounds', '', toggle('notifications.sound')));
-  p.appendChild(fieldRow('Volume', '', range('notifications.volume', 0, 1, 0.05, 1)));
+  p.appendChild(fieldRow('Volume', 'Also used for the startup sound.', range('notifications.volume', 0, 1, 0.05, 1)));
+  p.appendChild(fieldRow('Startup sound', 'Soundtrack for the launch animation.', toggle('notifications.startupSound')));
   p.appendChild(fieldRow('Threat alert: sniper score from', 'Also alerts for anyone blacklisted, regardless of score.', number('notifications.threatMinSniper', 20, 100, 5)));
   const test = el('button', 'ghost'); test.textContent = 'Send test notifications';
   test.onclick = () => api.previewNotification();

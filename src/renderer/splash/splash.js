@@ -10,6 +10,92 @@
 const api = window.solarBridge;
 api.appInfo().then((i) => { document.getElementById('ver').textContent = 'v' + i.version; }).catch(() => {});
 
+// ---------- soundtrack (synthesised, scheduled against the same timeline as the visuals) ----------
+// ambient swell under the forming galaxy -> sub boom + bell at ignition (2.05s) -> a pluck per
+// planet -> rising whoosh into the warp. Uses the notification volume; Settings can turn it off.
+function soundtrack(volume, ac = new AudioContext()) {
+  const t0 = ac.currentTime + 0.05;
+  // Master bus -> gentle compressor -> hard limiter, so the ignition hit can never clip.
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.knee.value = 12; comp.ratio.value = 4; comp.attack.value = 0.004; comp.release.value = 0.25;
+  const limit = ac.createDynamicsCompressor();
+  limit.threshold.value = -3; limit.knee.value = 0; limit.ratio.value = 20; limit.attack.value = 0.001; limit.release.value = 0.1;
+  const master = ac.createGain(); master.gain.value = volume; master.connect(comp); comp.connect(limit); limit.connect(ac.destination);
+  // A little space around everything: two short feedback delays standing in for reverb.
+  const wet = ac.createGain(); wet.gain.value = 0.28; wet.connect(master);
+  for (const [time, fb] of [[0.13, 0.42], [0.21, 0.35]]) {
+    const d = ac.createDelay(1); d.delayTime.value = time;
+    const g = ac.createGain(); g.gain.value = fb;
+    const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2400;
+    wet.connect(d); d.connect(lp); lp.connect(g); g.connect(d); lp.connect(master);
+  }
+  const out = (node, send = 0.5) => { node.connect(master); const s = ac.createGain(); s.gain.value = send; node.connect(s); s.connect(wet); };
+  const env = (g, at, peak, attack, hold, release) => {
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(peak, at + attack);
+    g.gain.setValueAtTime(peak, at + attack + hold);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + attack + hold + release);
+  };
+  const noise = (secs) => {
+    const b = ac.createBuffer(1, Math.ceil(ac.sampleRate * secs), ac.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const s = ac.createBufferSource(); s.buffer = b; return s;
+  };
+
+  // Ambient pad: detuned saws through a slowly opening low-pass (A minor-ish), swelling from silence.
+  const padF = ac.createBiquadFilter(); padF.type = 'lowpass'; padF.Q.value = 0.7;
+  padF.frequency.setValueAtTime(180, t0); padF.frequency.exponentialRampToValueAtTime(1400, t0 + 2.0); padF.frequency.exponentialRampToValueAtTime(700, t0 + 5.8);
+  const padG = ac.createGain(); env(padG, t0, 0.3, 1.9, 2.8, 1.6);
+  padF.connect(padG); out(padG, 0.6);
+  for (const [f, det] of [[110, -7], [110, 7], [164.8, -5], [220, 4], [261.6, -3]]) {
+    const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = f; o.detune.value = det;
+    const g = ac.createGain(); g.gain.value = 0.18; o.connect(g); g.connect(padF);
+    o.start(t0); o.stop(t0 + 6.5);
+  }
+  // Stardust: scattered high glints while the galaxy condenses.
+  const glints = [1760, 2093, 2349, 2637, 3136, 3520];
+  for (let i = 0; i < 16; i++) {
+    const at = t0 + 0.35 + Math.random() * 1.6, o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = glints[Math.floor(Math.random() * glints.length)];
+    env(g, at, 0.03 + Math.random() * 0.03, 0.005, 0, 0.35); o.connect(g); out(g, 0.9);
+    o.start(at); o.stop(at + 0.45);
+  }
+  // Riser into ignition: filtered noise sweeping up.
+  const rise = noise(1.4), rf = ac.createBiquadFilter(), rg = ac.createGain();
+  rf.type = 'bandpass'; rf.Q.value = 1.4; rf.frequency.setValueAtTime(300, t0 + 0.7); rf.frequency.exponentialRampToValueAtTime(5000, t0 + 2.05);
+  env(rg, t0 + 0.7, 0.12, 1.3, 0, 0.05); rise.connect(rf); rf.connect(rg); out(rg, 0.3); rise.start(t0 + 0.7);
+
+  // Ignition (2.05s): sub boom, noise crack, bright bell.
+  const ig = t0 + 2.05;
+  const sub = ac.createOscillator(), sg = ac.createGain();
+  sub.type = 'sine'; sub.frequency.setValueAtTime(130, ig); sub.frequency.exponentialRampToValueAtTime(34, ig + 0.9);
+  env(sg, ig, 0.42, 0.008, 0.05, 1.3); sub.connect(sg); out(sg, 0.15); sub.start(ig); sub.stop(ig + 1.6);
+  const crack = noise(1.2), cf = ac.createBiquadFilter(), cg = ac.createGain();
+  cf.type = 'lowpass'; cf.frequency.setValueAtTime(6000, ig); cf.frequency.exponentialRampToValueAtTime(200, ig + 1.0);
+  env(cg, ig, 0.16, 0.004, 0.02, 0.9); crack.connect(cf); cf.connect(cg); out(cg, 0.6); crack.start(ig);
+  for (const [f, v] of [[880, 0.07], [1318.5, 0.05], [1760, 0.035], [2637, 0.02]]) {
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = 'sine'; o.frequency.value = f;
+    env(g, ig + 0.02, v, 0.006, 0, 2.4); o.connect(g); out(g, 0.8); o.start(ig); o.stop(ig + 2.6);
+  }
+  // A pluck as each planet arrives (matches PLANETS[].start).
+  for (const [at, f] of [[2.55, 659.3], [2.8, 784], [3.05, 987.8]]) {
+    const o = ac.createOscillator(), o2 = ac.createOscillator(), g = ac.createGain();
+    o.type = 'triangle'; o.frequency.value = f; o2.type = 'sine'; o2.frequency.value = f * 2;
+    env(g, t0 + at, 0.11, 0.004, 0, 0.9); o.connect(g); o2.connect(g); out(g, 0.8);
+    o.start(t0 + at); o2.start(t0 + at); o.stop(t0 + at + 1); o2.stop(t0 + at + 1);
+  }
+  // Warp (4.85s): whoosh sweeping up into the fade.
+  const wa = t0 + 4.85, whoosh = noise(1.3), wf = ac.createBiquadFilter(), wg = ac.createGain();
+  wf.type = 'bandpass'; wf.Q.value = 2; wf.frequency.setValueAtTime(250, wa); wf.frequency.exponentialRampToValueAtTime(7000, wa + 1.1);
+  env(wg, wa, 0.4, 0.9, 0, 0.3); whoosh.connect(wf); wf.connect(wg); out(wg, 0.5); whoosh.start(wa);
+  if (ac.close) setTimeout(() => ac.close().catch(() => {}), 7500);
+}
+api.getConfig().then((cfg) => {
+  const n = cfg.notifications || {};
+  if (n.startupSound === false) return;
+  soundtrack(Math.max(0, Math.min(1, Number(n.volume ?? 0.6))) * 0.9);
+}).catch(() => {});
+
 const HOLD_MS = 5800; // total time on screen before the fade-out hand-off (matches splash.css)
 const FADE_MS = 550;
 

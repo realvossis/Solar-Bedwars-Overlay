@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 — 2026-09-26
 
 ### Added
 - **Name Watch**: your own list of plain-text or `/regex/` rules, checked against every player on the
@@ -31,6 +31,9 @@
   into the Solar sun (flash, shockwave, flare), planets swinging onto their orbits, and a hyperspace-warp
   exit. Drawn on a canvas tuned for CPU rendering (runs at the monitor refresh rate, automatically
   thins particles on slow machines, respects reduced motion). It no longer takes focus when it appears.
+- Startup soundtrack synced to the animation (synthesized: ambient swell, ignition boom and bell,
+  a pluck per planet, warp whoosh), limited so it never clips. Uses the notification volume; can be
+  turned off under Settings → Notifications.
 - Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.
 - IPC text inputs now accept strings only.
 

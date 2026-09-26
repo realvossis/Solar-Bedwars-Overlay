@@ -199,7 +199,7 @@ function defaults() {
     // ---- Notifications (corner popups + sounds; see notifications.js) ----
     // Popups never take focus from the game. Each event can show a popup and/or play a sound.
     notifications: {
-      enabled: true, position: 'bottom-right', durationSec: 7, sound: true, volume: 0.6, threatMinSniper: 70,
+      enabled: true, position: 'bottom-right', durationSec: 7, sound: true, volume: 0.6, threatMinSniper: 70, startupSound: true,
       events: {
         nickMatch: { popup: true, sound: true }, mention: { popup: true, sound: true }, dm: { popup: true, sound: true },
         partyInvite: { popup: true, sound: true }, friendRequest: { popup: true, sound: false },

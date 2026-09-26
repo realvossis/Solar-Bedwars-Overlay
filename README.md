@@ -129,6 +129,8 @@ a **threat joining your lobby** (blacklisted, or sniper score over your threshol
 per lobby), and Name Watch hits. You can pick the corner, duration and volume, and there's a
 preview button.
 
+The launch animation has its own synced soundtrack (Settings → Notifications → Startup sound).
+
 **Popups never take focus from your game.** They live in a window that can't be activated or
 clicked, is only ever shown inactive, and dismisses itself. The app's launch splash doesn't take
 focus either, so starting Solar mid-game won't tab you out.
