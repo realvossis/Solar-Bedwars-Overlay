@@ -26,6 +26,8 @@ contextBridge.exposeInMainWorld('solarBridge', {
   openSettings: () => invoke('open:settings'),
   openBlacklist: () => invoke('open:blacklist'),
   quit: () => invoke('app:quit'),
+  relaunch: () => invoke('app:relaunch'),
+  appInfo: () => invoke('app:info'),
 
   // urchin / blacklist
   adminAddTag: (payload) => invoke('urchin:addTag', payload),

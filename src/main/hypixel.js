@@ -8,6 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { withTimeout } = require('./net');
 
 let dataDir = null;
 function dir() {
@@ -58,7 +59,7 @@ class Hypixel {
     const hit = this.uuidCache[key];
     if (hit && Date.now() - hit.ts < 24 * 3600 * 1000) return hit;
     try {
-      const r = await fetch('https://api.mojang.com/users/profiles/minecraft/' + encodeURIComponent(name));
+      const r = await fetch('https://api.mojang.com/users/profiles/minecraft/' + encodeURIComponent(name), withTimeout());
       if (r.status === 204 || r.status === 404) return null; // nicked / nonexistent
       if (!r.ok) throw new Error('mojang ' + r.status);
       const j = await r.json();
@@ -69,6 +70,22 @@ class Hypixel {
     } catch (e) { return null; }
   }
 
+  // UUID -> current name, for lookups typed as a UUID (e.g. in the Blacklist Admin window).
+  async resolveName(uuid) {
+    const id = String(uuid || '').replace(/-/g, '').toLowerCase();
+    if (!/^[0-9a-f]{32}$/.test(id)) return null;
+    try {
+      const r = await fetch('https://sessionserver.mojang.com/session/minecraft/profile/' + id, withTimeout());
+      if (!r.ok || r.status === 204) return null;
+      const j = await r.json();
+      if (!j || !j.name) return null;
+      const rec = { id, name: j.name, ts: Date.now() };
+      this.uuidCache[j.name.toLowerCase()] = rec;
+      writeJson('uuid-cache.json', this.uuidCache);
+      return rec;
+    } catch (_) { return null; }
+  }
+
   async fetchPlayer(uuid) {
     const cfg = this.getConfig();
     const ttl = (cfg.cacheMinutes || 3) * 60 * 1000;
@@ -77,7 +94,7 @@ class Hypixel {
 
     await this.limiter();
     const url = 'https://api.hypixel.net/v2/player?uuid=' + uuid;
-    const r = await fetch(url, { headers: { 'API-Key': cfg.hypixelKey } });
+    const r = await fetch(url, withTimeout({ headers: { 'API-Key': cfg.hypixelKey } }));
     if (r.status === 429) { const e = new Error('RATE_LIMIT'); e.code = 429; throw e; }
     if (r.status === 403) { const e = new Error('BAD_KEY'); e.code = 403; throw e; }
     if (!r.ok) throw new Error('hypixel ' + r.status);

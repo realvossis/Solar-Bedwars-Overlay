@@ -27,8 +27,8 @@ const RANKCOLOR = {
   MODERATOR: '#00aa00', GAME_MASTER: '#00aa00', NONE: 'var(--text)',
 };
 // How a player actually ended up on the list — shown as a small badge next to their name so it's
-// obvious at a glance whether this is just someone in your game, or someone who invited/DM'd/killed
-// you specifically. GAME (plain lobby detection) is the common case and gets no badge on purpose.
+// obvious at a glance whether this is just someone in your game, or someone who invited/DM'd/
+// mentioned you specifically. GAME (plain lobby detection) is the common case and gets no badge on purpose.
 const SOURCE_BADGE = {
   PARTY: { title: 'In your party', color: '#58a6ff',
     svg: '<svg viewBox="0 0 16 10" width="12" height="8"><circle cx="6" cy="5" r="4.2" fill="currentColor" opacity=".95"/><circle cx="11" cy="5" r="4.2" fill="currentColor" opacity=".55"/></svg>' },
@@ -39,8 +39,6 @@ const SOURCE_BADGE = {
     svg: '<svg viewBox="0 0 16 12" width="13" height="10"><rect x=".7" y=".7" width="14.6" height="10.6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M1.3 1.3l6.7 5.7 6.7-5.7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>' },
   friendRequest: { title: 'Sent you a friend request', color: '#3ddc97',
     svg: '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="6" cy="5" r="3" fill="currentColor"/><path d="M1 15c0-3 2.2-5 5-5s5 2 5 5" fill="currentColor"/><path d="M12 4v4M10 6h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>' },
-  kill: { title: 'Final-killed you', color: '#ff5555',
-    svg: '<svg viewBox="0 0 16 16" width="12" height="12"><circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1v3M8 12v3M1 8h3M12 8h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' },
   MANUAL: { title: 'Added manually', color: '#8b949e', text: '+' },
   house: { title: 'Their Housing instance you teleported into', color: '#c9a06b',
     svg: '<svg viewBox="0 0 16 16" width="12" height="11"><path d="M8,1.5 L14.5,7 L12.5,7 L12.5,14.5 L3.5,14.5 L3.5,7 L1.5,7 Z" fill="currentColor"/></svg>' },
@@ -343,9 +341,11 @@ function actionsCell(row){
 
 function render(){
   if(!cfg) return;
+  hideTip(); // the row it belonged to is about to be replaced
   const body = $('#body'); body.innerHTML='';
   const list = sorted();
   $('#count').textContent = rows.length;
+  renderSummary();
   $('#empty').classList.toggle('hidden', rows.length>0);
   const cols = orderedColumns();
   const hlStat = cfg.highlightEnabled !== false ? cfg.highlightStat : null;
@@ -354,6 +354,7 @@ function render(){
     if(blCount(row)>0) tr.classList.add('bl');
     if(row.nicked) tr.classList.add('nicked');
     if(row.source==='SELF' || row.source==='PARTY') tr.classList.add('team');
+    if(row.left) tr.classList.add('left');
     if(hlStat){
       const v = sortVal(row, hlStat);
       if(typeof v==='number' && v >= (cfg.highlightThreshold ?? Infinity)) tr.classList.add('highlight');
@@ -366,6 +367,24 @@ function render(){
     tr.onmouseleave = hideTip;
     body.appendChild(tr);
   }
+}
+
+// Title-bar chips: how many real threats are in the lobby, and how big your tracked party is -
+// the two things worth knowing before even reading the table.
+function isThreat(row){
+  if(row.source==='SELF' || row.source==='PARTY' || row.left) return false;
+  return blCount(row)>0 || ((row.urchin && row.urchin.severity) || 0) >= 0.6 || ((row.sniper && row.sniper.score) || 0) >= 70;
+}
+function renderSummary(){
+  const threats = rows.filter(isThreat);
+  const party = rows.filter((r)=>r.source==='PARTY');
+  const tc = $('#threatChip'), pc = $('#partyChip');
+  tc.classList.toggle('hidden', !threats.length);
+  tc.textContent = '⚠ ' + threats.length;
+  tc.title = threats.length ? 'Threats in lobby: ' + threats.map((r)=>r.name).join(', ') : '';
+  pc.classList.toggle('hidden', !party.length);
+  pc.textContent = '👥 ' + (party.length + (rows.some((r)=>r.source==='SELF') ? 1 : 0));
+  pc.title = party.length ? 'Party: ' + party.map((r)=>r.name).join(', ') : '';
 }
 
 // ---------------- tooltip ----------------
@@ -420,7 +439,7 @@ function rowMenu(x,y,row){
   const head=el('div','head'); head.textContent=row.name; m.appendChild(head);
   const add=(label,fn)=>{ const it=el('div','item'); it.textContent=label; it.onclick=()=>{hideCtx();fn();}; m.appendChild(it); };
   add('Open on Plancke ↗', ()=> row.uuid && api.openLink('https://plancke.io/hypixel/player/stats/'+row.uuid));
-  add('Open on Hypixel.net ↗', ()=> row.uuid && api.openLink('https://hypixel.net/'));
+  add('Open on NameMC ↗', ()=> row.uuid && api.openLink('https://namemc.com/profile/'+row.uuid));
   add('Copy username', ()=> navigator.clipboard.writeText(row.name));
   m.appendChild(el('div','sep'));
   add('＋ Local info tag…', ()=> tagModal(row));
@@ -470,7 +489,7 @@ async function init(){
   rows = await api.getRoster();
   applyAll();
 
-  api.onRoster((list)=>{ rows=list; render(); $('#count').textContent=rows.length; });
+  api.onRoster((list)=>{ rows=list; render(); });
   api.onConfigChanged((c)=>{ cfg=c; applyAll(); });
   api.onToast(toast);
   api.onLogStatus((s)=> $('#logdot').classList.toggle('ok', !!s.ok));

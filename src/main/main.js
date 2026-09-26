@@ -1,11 +1,25 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell, session } = require('electron');
 const path = require('path');
+
+// Dev-only: point a `npm run dev` session at a throwaway profile (SOLAR_USER_DATA=some/dir) so
+// testing never touches your real config/keys. Ignored entirely in the packaged app.
+if (!app.isPackaged && process.env.SOLAR_USER_DATA) app.setPath('userData', path.resolve(process.env.SOLAR_USER_DATA));
+
 const config = require('./config');
 const { Hypixel } = require('./hypixel');
 const { Urchin } = require('./urchin');
 const { Roster } = require('./roster');
-const { LogWatcher } = require('./logWatcher');
+const { LogWatcher, validName } = require('./logWatcher');
+
+// ---------------- rendering pipeline ----------------
+// The overlay is a transparent, topmost window sitting directly over Minecraft's OpenGL surface.
+// With Chromium's GPU compositor running, some drivers report GL_INVALID_OPERATION (1282) in the
+// game - two GPU clients fighting over the same composited region. Software rendering takes the
+// overlay out of the GPU pipeline entirely, and costs nothing noticeable for a small table.
+// Must be decided before 'ready', hence the raw early read (see config.readEarly).
+const gpuAtLaunch = !!config.readEarly('gpuAcceleration', false);
+if (!gpuAtLaunch) app.disableHardwareAcceleration();
 
 let overlayWin = null, settingsWin = null, blacklistWin = null, splashWin = null, tray = null;
 let hypixel, urchin, roster, watcher;
@@ -20,6 +34,11 @@ let currentServer;
 function inBedwarsMatch() { return typeof currentServer === 'string' && /^mini/i.test(currentServer); }
 
 const getConfig = () => config.load();
+const ICON = path.join(__dirname, '..', '..', 'assets', 'icon-256.png');
+
+// Every window gets the same locked-down renderer: no Node, isolated context, OS-level sandbox.
+// The preload's contextBridge API is the only thing a page can reach.
+const SECURE_PREFS = { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webviewTag: false, spellcheck: false };
 
 // ---------------- windows ----------------
 function createOverlay() {
@@ -30,17 +49,26 @@ function createOverlay() {
     frame: false, transparent: true, resizable: true, movable: true, fullscreenable: false,
     alwaysOnTop: cfg.alwaysOnTop, skipTaskbar: false, backgroundColor: '#00000000',
     hasShadow: false, title: 'Solar Overlay', show: false,
-    icon: path.join(__dirname, '..', '..', 'assets', 'icon-256.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    icon: ICON,
+    webPreferences: SECURE_PREFS,
   });
-  overlayWin.setAlwaysOnTop(cfg.alwaysOnTop, 'screen-saver');
+  applyAlwaysOnTop();
   applyCapture();
   applyClickThrough();
   overlayWin.setOpacity(cfg.window.opacity ?? 0.94);
   overlayWin.loadFile(path.join(__dirname, '..', 'renderer', 'overlay', 'overlay.html'));
   blockFullscreenKey(overlayWin);
 
-  const persist = () => { const b = overlayWin.getBounds(); config.save({ window: { ...getConfig().window, x: b.x, y: b.y, width: b.width, height: b.height } }); };
+  // Debounced: a drag fires 'moved'/'resized' dozens of times a second, and each save is a disk write.
+  let persistTimer = null;
+  const persist = () => {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      if (!overlayWin || overlayWin.isDestroyed()) return;
+      const b = overlayWin.getBounds();
+      config.save({ window: { ...getConfig().window, x: b.x, y: b.y, width: b.width, height: b.height } });
+    }, 250);
+  };
   overlayWin.on('moved', persist);
   overlayWin.on('resized', persist);
   overlayWin.on('closed', () => { overlayWin = null; });
@@ -54,14 +82,28 @@ function createSplash() {
     width: 460, height: 300, frame: false, transparent: true, resizable: false, movable: false,
     fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#00000000',
     hasShadow: false, show: false, center: true,
-    icon: path.join(__dirname, '..', '..', 'assets', 'icon-256.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    icon: ICON,
+    webPreferences: SECURE_PREFS,
   });
   splashWin.once('ready-to-show', () => splashWin.show());
   splashWin.loadFile(path.join(__dirname, '..', 'renderer', 'splash', 'splash.html'));
   splashWin.on('closed', () => { splashWin = null; });
+  // Safety net: if the splash page ever fails to report in, don't leave the overlay hidden forever.
+  setTimeout(finishSplash, 12000);
+}
+function finishSplash() {
+  if (splashWin && !splashWin.isDestroyed()) splashWin.close();
+  if (overlayWin && !overlayWin.isDestroyed() && !overlayWin.isVisible()) overlayWin.showInactive();
 }
 
+// Each of these touches window state the OS compositor (DWM) cares about - topmost z-order and
+// capture exclusion. They're only re-applied when their own setting actually changes, never on
+// every unrelated config save (sorting a column, dragging the window...), so the overlay isn't
+// constantly re-poking the compositor while the game is rendering underneath it.
+function applyAlwaysOnTop() {
+  if (!overlayWin) return;
+  overlayWin.setAlwaysOnTop(!!getConfig().alwaysOnTop, 'screen-saver');
+}
 function applyCapture() {
   if (!overlayWin) return;
   overlayWin.setContentProtection(!!getConfig().hideFromCapture); // WDA_EXCLUDEFROMCAPTURE on Windows
@@ -83,8 +125,8 @@ function childWindow(file, opts = {}) {
   const win = new BrowserWindow({
     width: opts.width || 760, height: opts.height || 620, frame: false, resizable: true, fullscreenable: false,
     backgroundColor: '#0d1117', title: opts.title || 'Solar',
-    icon: path.join(__dirname, '..', '..', 'assets', 'icon-256.png'),
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+    icon: ICON,
+    webPreferences: SECURE_PREFS,
   });
   win.loadFile(file);
   blockFullscreenKey(win);
@@ -110,6 +152,12 @@ function openBlacklist() {
   blacklistWin.on('closed', () => { blacklistWin = null; });
 }
 
+// Only the Settings window ever needs to see real API keys (to edit them). Everything else gets
+// a redacted copy - the overlay has no use for them, so a bug there can't leak one.
+function configFor(win) { const c = getConfig(); return win && win === settingsWin ? c : config.redact(c); }
+function broadcastConfig() {
+  for (const w of [overlayWin, settingsWin, blacklistWin]) if (w && !w.isDestroyed()) w.webContents.send('config:changed', configFor(w));
+}
 function broadcast(channel, payload) {
   for (const w of [overlayWin, settingsWin, blacklistWin]) if (w && !w.isDestroyed()) w.webContents.send(channel, payload);
 }
@@ -148,13 +196,14 @@ function wireWatcher() {
   // Opt-in (see trackChatSpeakers in Settings) on top of that - some people still don't want
   // random match-lobby chatter added even once scoped correctly.
   watcher.on('chatSpeaker', (n) => { if (getConfig().trackChatSpeakers && inBedwarsMatch()) roster.addNames([n], 'GAME'); });
-  watcher.on('partyList', (names) => roster.addNames(names, 'PARTY'));
-  watcher.on('quit', (n) => { /* keep in list; optional removal */ });
+  watcher.on('quit', (n) => roster.markLeft(n));
   // Housing fires its own serverChange twice in a row - once for the housing lobby, once more
   // for the actual house instance right after the teleport message names its owner - so a plain
   // clear-on-serverChange would wipe the owner right back out the moment they're added. Re-add
   // them once, but only if that second serverChange lands within a few seconds of the teleport;
   // past that it's a stale value from some earlier, unrelated house and shouldn't leak forward.
+  // (Housing has none of Bedwars' lobby-fill/kill-feed chatter, so the owner is the one useful
+  // thing to auto-track there.)
   let pendingHouseOwner = null, pendingHouseOwnerTs = 0;
   watcher.on('houseEntered', (owner) => {
     pendingHouseOwner = owner; pendingHouseOwnerTs = Date.now();
@@ -170,13 +219,24 @@ function wireWatcher() {
     pendingHouseOwner = null;
   });
 
-  // Each trigger passes its own "kind" through to the roster row so the overlay can show
-  // a distinct badge for how a player was actually detected (party, mention, DM, ...),
-  // not just a generic "flagged" marker.
+  // ---- party: tracked from every signal Hypixel gives, so /p list is never required ----
   watcher.on('partyJoin', (names) => {
     roster.addNames(names, 'PARTY');
     if (getConfig().triggers.onPartyJoin) names.forEach((n) => watchlistAdd(n, 'joined your party', 'PARTY'));
   });
+  // You accepted someone's invite: whatever party you were in before is over, and the leader -
+  // who used to vanish from the list here - is the first member of the new one. The rest arrive
+  // on the "You'll be partying with:" line right after.
+  watcher.on('partyJoined', (leader) => { roster.disbandParty(); roster.addNames([leader], 'PARTY'); });
+  watcher.on('partyMember', (n) => roster.addNames([n], 'PARTY'));
+  watcher.on('partyList', (names) => roster.addNames(names, 'PARTY'));
+  watcher.on('partyRoster', (names) => roster.setParty(names));
+  watcher.on('partyLeave', (n) => roster.leaveParty(n));
+  watcher.on('partyDisband', () => roster.disbandParty());
+
+  // Each trigger passes its own "kind" through to the roster row so the overlay can show
+  // a distinct badge for how a player was actually detected (party, mention, DM, ...),
+  // not just a generic "flagged" marker.
   watcher.on('partyInvite', (n) => {
     if (getConfig().triggers.onPartyInvite) watchlistAdd(n, 'party invite', 'partyInvite');
     toast(`Party invite from ${n}`, 'info');
@@ -190,10 +250,6 @@ function wireWatcher() {
     if (getConfig().triggers.onNameInChat) watchlistAdd(by, 'said your name: ' + (text || '').slice(0, 40), 'mention');
     toast(`${by} mentioned you`, 'warn');
   });
-  watcher.on('killedYou', (n) => { if (getConfig().triggers.onKilledYou) watchlistAdd(n, 'final-killed you', 'kill'); });
-  // Housing has none of Bedwars' lobby-fill/kill-feed chatter, so the house owner (from the
-  // teleport message) is the one useful thing to auto-track there.
-  watcher.on('houseEntered', (owner) => roster.addNames([owner], 'house'));
   // De-nick attempt: match the killer's reported lifetime final-kill count against players this
   // app has already seen stats for (see hypixel.findByFinalKills — there's no way to search
   // Hypixel-wide, only what's locally cached). Only useful when it points somewhere other than
@@ -215,56 +271,114 @@ function wireWatcher() {
 // ---------------- refresh loop ----------------
 function applyRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
-  const s = getConfig().refreshSeconds || 0;
-  if (s > 0) refreshTimer = setInterval(() => roster.refreshAll(), s * 1000);
+  refreshTimer = null;
+  const s = Math.max(0, Number(getConfig().refreshSeconds) || 0);
+  // Floor of 15s: anything faster just burns the Hypixel key's rate limit on unchanged stats.
+  if (s > 0) refreshTimer = setInterval(() => roster.refreshAll(), Math.max(15, s) * 1000);
 }
 
 // ---------------- IPC ----------------
+// Only our own windows, showing our own bundled pages, may call into the main process.
+function isTrustedSender(e) {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  if (!win || ![overlayWin, settingsWin, blacklistWin, splashWin].includes(win)) return false;
+  try { return new URL(e.senderFrame.url).protocol === 'file:'; } catch (_) { return false; }
+}
+function handle(channel, fn) {
+  ipcMain.handle(channel, (e, ...args) => {
+    if (!isTrustedSender(e)) throw new Error('Blocked IPC from untrusted sender');
+    return fn(e, ...args);
+  });
+}
+
+const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{32}$/i.test(v.replace(/-/g, ''));
+const cleanText = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
+
+// shell.openExternal hands the URL to the OS, so it only ever gets https links to the handful of
+// sites the app actually links to - never file:, custom protocols, or arbitrary hosts.
+const EXTERNAL_HOSTS = new Set(['plancke.io', 'namemc.com', 'hypixel.net', 'developer.hypixel.net', 'urchin.gg', 'github.com']);
+function openExternalSafe(url) {
+  let u;
+  try { u = new URL(String(url)); } catch (_) { return false; }
+  if (u.protocol !== 'https:' || u.username || u.password) return false;
+  if (!EXTERNAL_HOSTS.has(u.hostname.replace(/^www\./, ''))) return false;
+  shell.openExternal(u.href);
+  return true;
+}
+
 function registerIpc() {
-  ipcMain.handle('config:get', () => getConfig());
-  ipcMain.handle('config:reset', () => { const c = config.reset(); afterConfigChange(); broadcast('config:changed', c); return c; });
-  ipcMain.handle('config:set', (_e, patch) => {
-    const c = config.save(patch || {});
+  handle('config:get', (e) => configFor(BrowserWindow.fromWebContents(e.sender)));
+  handle('config:reset', (e) => { config.reset(); afterConfigChange(null); broadcastConfig(); return configFor(BrowserWindow.fromWebContents(e.sender)); });
+  handle('config:set', (e, patch) => {
+    if (!isPlainObject(patch)) throw new Error('Invalid config patch');
+    config.save(patch);
     afterConfigChange(patch);
-    broadcast('config:changed', c);
-    return c;
+    broadcastConfig();
+    return configFor(BrowserWindow.fromWebContents(e.sender));
   });
 
-  ipcMain.handle('roster:get', () => roster.list());
-  ipcMain.handle('roster:add', (_e, name) => { roster.addNames([name], 'MANUAL'); return true; });
-  ipcMain.handle('roster:remove', (_e, id) => { id.length === 32 ? roster.removeByUuid(id) : roster.removeByName(id); return true; });
-  ipcMain.handle('roster:clear', () => { roster.clear(); return true; });
-  ipcMain.handle('roster:refresh', () => { roster.refreshAll(); return true; });
-
-  ipcMain.handle('overlay:setClickThrough', (_e, v) => { config.save({ clickThrough: !!v }); applyClickThrough(); return v; });
-  ipcMain.handle('window:min', () => BrowserWindow.getFocusedWindow()?.minimize());
-  ipcMain.handle('window:close', () => { const w = BrowserWindow.getFocusedWindow(); if (w === overlayWin) app.quit(); else w?.close(); });
-  ipcMain.handle('open:settings', () => openSettings());
-  ipcMain.handle('open:blacklist', () => openBlacklist());
-  ipcMain.handle('app:quit', () => app.quit());
-  ipcMain.handle('splash:done', () => {
-    if (splashWin && !splashWin.isDestroyed()) splashWin.close();
-    if (overlayWin) overlayWin.show();
+  handle('roster:get', () => roster.list());
+  handle('roster:add', (_e, name) => {
+    const n = cleanText(name, 16);
+    if (!validName(n)) return false;
+    roster.addNames([n], 'MANUAL');
     return true;
   });
+  handle('roster:remove', (_e, id) => {
+    if (typeof id !== 'string') return false;
+    if (isUuid(id)) roster.removeByUuid(id.replace(/-/g, '').toLowerCase());
+    else if (validName(id)) roster.removeByName(id);
+    return true;
+  });
+  handle('roster:clear', () => { roster.clear(); return true; });
+  handle('roster:refresh', () => { roster.refreshAll(); return true; });
 
-  ipcMain.handle('urchin:addTag', (_e, payload) => urchin.addTag(payload));
-  ipcMain.handle('urchin:addLocal', (_e, uuid, tag) => { urchin.addLocalTag(uuid, tag); roster.refreshAll(); return true; });
-  ipcMain.handle('watchlist:add', (_e, name, reason) => watchlistAdd(name, reason || 'manual', 'MANUAL'));
+  handle('overlay:setClickThrough', (_e, v) => { config.save({ clickThrough: !!v }); applyClickThrough(); return !!v; });
+  // Act on the window that asked, not whichever happens to be focused - those can differ.
+  handle('window:min', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
+  handle('window:close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w === overlayWin) app.quit(); else w?.close(); });
+  handle('open:settings', () => openSettings());
+  handle('open:blacklist', () => openBlacklist());
+  handle('app:quit', () => app.quit());
+  handle('app:relaunch', () => { app.relaunch(); app.quit(); });
+  handle('app:info', () => ({ version: app.getVersion(), gpuAtLaunch }));
+  handle('splash:done', () => { finishSplash(); return true; });
 
-  ipcMain.handle('lookup:name', async (_e, name) => {
-    const r = await hypixel.resolveUuid(name);
+  handle('urchin:addTag', (_e, payload) => {
+    if (!isPlainObject(payload) || !isUuid(payload.uuid)) throw new Error('Invalid UUID');
+    const tag_type = cleanText(payload.tag_type, 40);
+    const reason = cleanText(payload.reason, 500);
+    if (!tag_type || !reason) throw new Error('Tag type and reason are required');
+    return urchin.addTag({ uuid: payload.uuid, tag_type, reason, hide_username: !!payload.hide_username, overwrite: !!payload.overwrite });
+  });
+  handle('urchin:addLocal', (_e, uuid, tag) => {
+    if (!isUuid(uuid) || !isPlainObject(tag)) return false;
+    urchin.addLocalTag(uuid, { tag_type: cleanText(tag.tag_type, 40) || 'info', reason: cleanText(tag.reason, 200) || 'flagged' });
+    roster.refreshAll();
+    return true;
+  });
+  handle('watchlist:add', (_e, name, reason) => {
+    const n = cleanText(name, 16);
+    if (!validName(n)) return false;
+    return watchlistAdd(n, cleanText(reason, 80) || 'manual', 'MANUAL');
+  });
+
+  // Accepts a username or a UUID (with or without dashes).
+  handle('lookup:name', async (_e, query) => {
+    const q = cleanText(query, 40);
+    const r = isUuid(q) ? await hypixel.resolveName(q) : (validName(q) ? await hypixel.resolveUuid(q) : null);
     if (!r) return { ok: false, error: 'not found (nicked or invalid)' };
     const ur = await urchin.lookup(r.id, r.name).catch(() => null);
     return { ok: true, uuid: r.id, name: r.name, urchin: ur };
   });
 
-  ipcMain.handle('key:test', async () => {
+  handle('key:test', async () => {
     // /v2/key used to be how you checked a key, but Hypixel removed it - it now 404s
     // ("Unknown endpoint") even for a perfectly valid key. Rate-limit info comes back as
     // headers on any real call now, so ping a tiny no-target endpoint instead and read those.
     try {
-      const r = await fetch('https://api.hypixel.net/v2/punishmentstats', { headers: { 'API-Key': getConfig().hypixelKey } });
+      const r = await fetch('https://api.hypixel.net/v2/punishmentstats', { headers: { 'API-Key': getConfig().hypixelKey }, signal: AbortSignal.timeout(10000) });
       const j = await r.json().catch(() => ({}));
       if (r.ok && j.success) {
         const limit = r.headers.get('ratelimit-limit');
@@ -274,31 +388,42 @@ function registerIpc() {
     } catch (e) { return { ok: false, error: String(e.message || e) }; }
   });
 
-  ipcMain.handle('log:pick', async () => {
-    const r = await dialog.showOpenDialog({ title: 'Select latest.log', properties: ['openFile'], filters: [{ name: 'Log', extensions: ['log', 'txt'] }] });
+  handle('log:pick', async (e) => {
+    const parent = BrowserWindow.fromWebContents(e.sender);
+    const r = await dialog.showOpenDialog(parent, { title: 'Select latest.log', properties: ['openFile'], filters: [{ name: 'Log', extensions: ['log', 'txt'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
-    config.save({ logPath: r.filePaths[0] }); startWatcher(); broadcast('config:changed', getConfig());
+    config.save({ logPath: r.filePaths[0] }); startWatcher(); broadcastConfig();
     return r.filePaths[0];
   });
 
-  ipcMain.handle('link:open', (_e, url) => shell.openExternal(url));
-  ipcMain.handle('log:getStatus', () => lastLogStatus);
+  handle('link:open', (_e, url) => openExternalSafe(url));
+  handle('log:getStatus', () => lastLogStatus);
 }
 
 function applySelf() { const cfg = getConfig(); roster.setSelf(cfg.selfName, cfg.hideSelf); }
 
-function afterConfigChange(patch = {}) {
+// patch === null means "everything may have changed" (a reset).
+function afterConfigChange(patch) {
+  const all = patch == null;
+  const has = (k) => all || patch[k] !== undefined;
   if (overlayWin) {
-    overlayWin.setAlwaysOnTop(getConfig().alwaysOnTop, 'screen-saver');
-    overlayWin.setOpacity(getConfig().window.opacity ?? 0.94);
-    applyCapture(); applyClickThrough();
+    if (has('alwaysOnTop')) applyAlwaysOnTop();
+    if (has('hideFromCapture')) applyCapture();
+    if (has('clickThrough')) applyClickThrough();
+    if (has('window')) overlayWin.setOpacity(getConfig().window.opacity ?? 0.94);
   }
-  if (patch.logPath !== undefined || patch.logEnabled !== undefined || patch.selfName !== undefined || patch.reactNames !== undefined) startWatcher();
-  if (patch.selfName !== undefined || patch.hideSelf !== undefined) applySelf();
-  if (patch.refreshSeconds !== undefined) applyRefreshTimer();
+  if (has('logPath') || has('logEnabled') || has('selfName') || has('reactNames')) startWatcher();
+  if (has('selfName') || has('hideSelf')) applySelf();
+  if (has('refreshSeconds')) applyRefreshTimer();
 }
 
 // ---------------- tray + shortcuts ----------------
+function toggleClickThrough() {
+  config.save({ clickThrough: !getConfig().clickThrough });
+  applyClickThrough();
+  broadcastConfig();
+  toast('Click-through ' + (getConfig().clickThrough ? 'ON' : 'OFF'));
+}
 function buildTray() {
   try {
     const img = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'icon.png'));
@@ -309,42 +434,70 @@ function buildTray() {
       { label: 'Settings', click: openSettings },
       { label: 'Blacklist Admin', click: openBlacklist },
       { type: 'separator' },
-      { label: 'Toggle Click-Through', click: () => { config.save({ clickThrough: !getConfig().clickThrough }); applyClickThrough(); } },
+      { label: 'Toggle Click-Through', click: toggleClickThrough },
       { label: 'Quit', click: () => app.quit() },
     ]));
     tray.on('double-click', toggleOverlay);
   } catch (_) {}
 }
-function toggleOverlay() { if (!overlayWin) { createOverlay(); overlayWin.show(); return; } overlayWin.isVisible() ? overlayWin.hide() : overlayWin.show(); }
+function toggleOverlay() { if (!overlayWin) { createOverlay(); overlayWin.show(); return; } overlayWin.isVisible() ? overlayWin.hide() : overlayWin.showInactive(); }
 
 function registerShortcuts() {
-  globalShortcut.register('Alt+B', toggleOverlay);
-  globalShortcut.register('Alt+X', () => { config.save({ clickThrough: !getConfig().clickThrough }); applyClickThrough(); toast('Click-through ' + (getConfig().clickThrough ? 'ON' : 'OFF')); });
-  globalShortcut.register('Alt+C', () => roster.clear());
-  globalShortcut.register('Alt+S', openSettings);
+  const bind = (accel, fn) => { if (!globalShortcut.register(accel, fn)) console.warn('shortcut unavailable (in use by another app):', accel); };
+  bind('Alt+B', toggleOverlay);
+  bind('Alt+X', toggleClickThrough);
+  bind('Alt+C', () => roster.clear());
+  bind('Alt+S', openSettings);
+}
+
+// ---------------- security baseline ----------------
+function lockDown() {
+  // No page may open new windows, navigate away from the file it was loaded with, or embed
+  // <webview>s - so even an injected link or script can't pull remote content into a window that
+  // has the preload bridge.
+  app.on('web-contents-created', (_e, contents) => {
+    contents.setWindowOpenHandler(({ url }) => { openExternalSafe(url); return { action: 'deny' }; });
+    contents.on('will-navigate', (ev, url) => { if (url !== contents.getURL()) ev.preventDefault(); });
+    contents.on('will-redirect', (ev) => ev.preventDefault());
+    contents.on('will-attach-webview', (ev) => ev.preventDefault());
+  });
+  // Deny every browser permission (camera, mic, geolocation, notifications, ...) except writing
+  // plain text to the clipboard, which "Copy username" uses.
+  const allowed = new Set(['clipboard-sanitized-write']);
+  session.defaultSession.setPermissionRequestHandler((_wc, perm, cb) => cb(allowed.has(perm)));
+  session.defaultSession.setPermissionCheckHandler((_wc, perm) => allowed.has(perm));
 }
 
 // ---------------- boot ----------------
-app.whenReady().then(() => {
-  Menu.setApplicationMenu(null); // no menu bar on this app, and it's what binds F11 -> fullscreen by default
-  hypixel = new Hypixel(getConfig);
-  urchin = new Urchin(getConfig);
-  roster = new Roster(hypixel, urchin, getConfig);
-  watcher = new LogWatcher();
+// One instance only: a second copy would fight the first over config.json, the log file, and the
+// global shortcuts. Launching again just brings the running overlay forward.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => { if (overlayWin) wake(overlayWin); });
 
-  roster.on('update', (list) => broadcast('roster:update', list));
-  wireWatcher();
-  registerIpc();
-  createSplash();
-  createOverlay(); // stays hidden (show:false) until the splash reports done, see ipcMain 'splash:done'
-  buildTray();
-  registerShortcuts();
-  startWatcher();
-  applyRefreshTimer();
-  applySelf(); // your own IGN, if configured, is in the list from the moment the app starts
+  app.whenReady().then(() => {
+    Menu.setApplicationMenu(null); // no menu bar on this app, and it's what binds F11 -> fullscreen by default
+    lockDown();
+    hypixel = new Hypixel(getConfig);
+    urchin = new Urchin(getConfig);
+    roster = new Roster(hypixel, urchin, getConfig);
+    watcher = new LogWatcher();
 
-  app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
-});
+    roster.on('update', (list) => broadcast('roster:update', list));
+    wireWatcher();
+    registerIpc();
+    createSplash();
+    createOverlay(); // stays hidden (show:false) until the splash reports done, see finishSplash()
+    buildTray();
+    registerShortcuts();
+    startWatcher();
+    applyRefreshTimer();
+    applySelf(); // your own IGN, if configured, is in the list from the moment the app starts
 
-app.on('window-all-closed', () => {}); // stay alive in tray
-app.on('will-quit', () => globalShortcut.unregisterAll());
+    app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
+  });
+
+  app.on('window-all-closed', () => {}); // stay alive in tray
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+}

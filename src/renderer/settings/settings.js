@@ -14,6 +14,11 @@ function patchOf(path, val) {
   cur[parts[parts.length - 1]] = val; return root;
 }
 async function set(path, val) { cfg = await api.setConfig(patchOf(path, val)); }
+// Mirrors net.js on the main side (which enforces it); checked here too so the user gets told why.
+function isSecureUrl(url) {
+  try { const u = new URL(url.replace(/{{?w+}?}/g, 'x')); return u.protocol === 'https:' || (u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname)); }
+  catch (_) { return false; }
+}
 
 const COLLABELS = { source: 'Source', tag: 'Tag', star: 'Lvl', name: 'Player', fkdr: 'FKDR', wlr: 'WLR', finals: 'F.Kills', wins: 'Wins', ws: 'WS', hws: 'Peak WS', mfkdr: 'M.FKDR', sniper: 'Sniper', lastseen: 'Last Login', bl: 'BL' };
 
@@ -187,7 +192,6 @@ function panelTriggers(p) {
     ['triggers.onPartyInvite', 'A player invites you to a party', ''],
     ['triggers.onDirectMessage', 'A player DMs you (/msg)', ''],
     ['triggers.onFriendRequest', 'A player friend-requests you', ''],
-    ['triggers.onKilledYou', 'A player final-kills you', 'Best-effort from kill messages.'],
   ];
   for (const [k, l, h] of t) p.appendChild(fieldRow(l, h, toggle(k)));
   p.appendChild(fieldRow('Watchlist tag type', 'Label applied to auto-flagged players.', select('autoTagType', [
@@ -212,7 +216,10 @@ function panelApi(p) {
 
   p.appendChild(header('Urchin', 'Custom blacklist endpoint. Placeholders {id} {uuid} {name} {sources} are substituted per player.'));
   const ep = el('textarea'); ep.value = cfg.urchinEndpoint || ''; ep.style.width = '360px';
-  ep.onchange = () => set('urchinEndpoint', ep.value);
+  ep.onchange = () => {
+    if (ep.value.trim() && !isSecureUrl(ep.value.trim())) { toast('Endpoint must be https:// - your key would otherwise travel unencrypted', 'err'); ep.value = cfg.urchinEndpoint || ''; return; }
+    set('urchinEndpoint', ep.value.trim());
+  };
   p.appendChild(fieldRow('Cubelify endpoint URL', 'Placeholders {id} {uuid} {name} {key} {sources} are substituted per player.', ep));
   p.appendChild(fieldRow('Urchin key', 'Substituted into {key} in the endpoint above.', secretText('urchinKey', 'urchin key')));
   p.appendChild(fieldRow('Sources', 'Comma-separated Urchin sources.', text('urchinSources', '', true)));
@@ -282,6 +289,7 @@ function openConnEditor(conn, idx) {
   cancel.onclick = () => back.remove();
   saveBtn.onclick = async () => {
     if (!name.value.trim() || !endpoint.value.trim()) { toast('Name and endpoint are both required', 'err'); return; }
+    if (!isSecureUrl(endpoint.value.trim())) { toast('Endpoint must start with https:// (plain http only for localhost)', 'err'); return; }
     const list = (cfg.connections || []).slice();
     const entry = {
       id: (conn && conn.id) || ('conn_' + Date.now().toString(36)),
@@ -515,13 +523,31 @@ function panelSniper(p) {
 
 function panelPerf(p) {
   p.appendChild(header('Performance', 'Keep it lightweight. Fetches are cached and rate-limited for your key.'));
-  p.appendChild(fieldRow('Auto-refresh (seconds)', '0 = only fetch when a new player is detected (lightest).', number('refreshSeconds', 0, 600, 5)));
+  p.appendChild(fieldRow('Auto-refresh (seconds)', '0 = only fetch when a new player is detected (lightest). Minimum 15 when on.', number('refreshSeconds', 0, 600, 5)));
   p.appendChild(fieldRow('Parallel lookups', 'How many players to fetch at once.', number('concurrency', 1, 10, 1)));
   p.appendChild(fieldRow('Stat cache (minutes)', 'Reuse fetched stats for this long.', number('cacheMinutes', 1, 30, 1)));
+
+  p.appendChild(header('Rendering', 'How the overlay draws itself on top of your game.'));
+  const gpu = toggle('gpuAcceleration');
+  const restart = el('button', 'ghost'); restart.textContent = 'Restart now'; restart.style.marginLeft = '10px';
+  restart.classList.add('hidden');
+  restart.onclick = () => api.relaunch();
+  const wrap = el('div'); wrap.style.cssText = 'display:flex;align-items:center';
+  wrap.appendChild(gpu); wrap.appendChild(restart);
+  // The setting only takes effect at launch - offer a restart whenever it differs from what's running.
+  api.appInfo().then((info) => {
+    const sync = () => restart.classList.toggle('hidden', !!cfg.gpuAcceleration === !!info.gpuAtLaunch);
+    gpu.querySelector('input').addEventListener('change', () => setTimeout(sync, 50));
+    sync();
+  });
+  p.appendChild(fieldRow('GPU acceleration', 'Off (recommended): the overlay renders on the CPU and never touches the GPU the game is using. This avoids Minecraft reporting "OpenGL error 1282 (invalid operation)" while the overlay is open. Needs a restart.', wrap));
 }
 
 function panelAbout(p) {
   p.appendChild(header('About & Shortcuts', ''));
+  const ver = el('div', 'kv'); ver.style.marginBottom = '8px';
+  api.appInfo().then((i) => { ver.textContent = 'Solar Overlay v' + i.version; });
+  p.appendChild(ver);
   const s = el('div'); s.innerHTML = `
     <div class="kv" style="font-size:12px;line-height:1.9">
       <span class="pill">Alt+B</span> show/hide overlay &nbsp;
@@ -529,7 +555,8 @@ function panelAbout(p) {
       <span class="pill">Alt+C</span> clear list &nbsp;
       <span class="pill">Alt+S</span> settings<br>
       Right-click a column header → toggle columns. Drag headers to reorder. Click header to sort.<br>
-      Right-click a player row → Plancke, copy, local tag, watchlist, remove.<br>
+      Right-click a player row → Plancke, NameMC, copy, local tag, watchlist, remove.<br>
+      Party members are picked up automatically (invites, joins, party chat, summons, /p list) — no need to run /p list.<br>
       Bundled local blacklist: <b>9,014 UUIDs / 9,349 tags</b> (info, caution, legit_sniper, account) imported from local exports.
     </div>`;
   p.appendChild(s);

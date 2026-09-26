@@ -7,6 +7,12 @@ const { EventEmitter } = require('events');
 const stats = require('./stats');
 const { monthlyFinalsDelta, highestWinstreak } = require('./urchin');
 
+// When the same player is detected more than one way, the more meaningful source wins - e.g. an
+// inviter first seen as 'partyInvite' becomes PARTY once you join them, and a lobby-mate who DMs
+// you gets the DM badge. A weaker signal never downgrades a stronger one.
+const SOURCE_RANK = { SELF: 100, PARTY: 50, MANUAL: 30, GAME: 10 };
+const rankOf = (s) => SOURCE_RANK[s] ?? 20; // triggers (mention, dm, partyInvite, house, ...)
+
 class Roster extends EventEmitter {
   constructor(hypixel, urchin, getConfig) {
     super();
@@ -22,9 +28,8 @@ class Roster extends EventEmitter {
 
   // clear() wipes everyone except "you" (source==='SELF') and your party (source==='PARTY') -
   // both are meant to be permanent fixtures across lobby/server transitions, not swept away with
-  // the rest of a stale lobby. Party membership doesn't reset just because the game does, and
-  // there's no reliable "left the party" log line to know when it actually changes - so like
-  // SELF, the only way a party member leaves the list is the per-row remove button.
+  // the rest of a stale lobby. Party membership doesn't reset just because the game does; it
+  // changes through the party events below (leave/kick/disband/a full /p list) or the remove button.
   clear() {
     const keep = [...this.players.entries()].filter(([, v]) => v.source === 'SELF' || v.source === 'PARTY');
     this.players.clear();
@@ -53,7 +58,12 @@ class Roster extends EventEmitter {
       if (!name) continue;
       const key = name.toLowerCase();
       if (cfg.hideSelf && (cfg.selfName || '').toLowerCase() === key) continue;
-      if (this.players.has(key)) { this.players.get(key).source = this.players.get(key).source || source; continue; }
+      const existing = this.players.get(key);
+      if (existing) {
+        if (rankOf(source) > rankOf(existing.source)) existing.source = source;
+        existing.left = false; // seen again - back in the lobby
+        continue;
+      }
       const row = { name, key, uuid: null, source, addedAt: Date.now(), loading: true };
       this.players.set(key, row);
       this._enqueue(row);
@@ -130,6 +140,36 @@ class Roster extends EventEmitter {
       this.players.set(key, row);
       this._enqueue(row);
     }
+    this._emit();
+  }
+
+  // ---- party membership ----
+  // A former member drops to GAME rather than vanishing: if they're in this same match they're
+  // still relevant (now as an opponent), and the next lobby clear sweeps them out normally.
+  _demote(row) { if (row && row.source === 'PARTY') row.source = 'GAME'; }
+
+  leaveParty(name) {
+    this._demote(this.players.get(String(name).toLowerCase()));
+    this._emit();
+  }
+
+  disbandParty() {
+    for (const row of this.players.values()) this._demote(row);
+    this._emit();
+  }
+
+  // A complete /p list: everyone in it is in your party, and nobody else is.
+  setParty(names) {
+    const keep = new Set(names.map((n) => String(n).toLowerCase()));
+    for (const row of this.players.values()) if (!keep.has(row.key)) this._demote(row);
+    this.addNames(names, 'PARTY');
+  }
+
+  // "X has quit!" - dimmed rather than dropped, so you can still see who left the pre-game lobby.
+  markLeft(name) {
+    const row = this.players.get(String(name).toLowerCase());
+    if (!row || row.source === 'SELF' || row.source === 'PARTY') return;
+    row.left = true;
     this._emit();
   }
 

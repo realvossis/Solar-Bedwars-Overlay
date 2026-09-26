@@ -14,9 +14,11 @@ html,body{width:100%;height:100%;background:transparent;overflow:hidden;
     var(--bg);
   border:1px solid rgba(255,255,255,.09);
   border-radius:12px;overflow:hidden;
-  box-shadow:0 12px 32px rgba(0,0,0,.45), 0 0 0 1px rgba(0,0,0,.2) inset;
-  backdrop-filter:blur(18px) saturate(150%);
+  box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;
 }
+/* No backdrop-filter/drop-shadow anywhere in this window: on a transparent overlay they blur
+   nothing visible, yet each one forces an extra offscreen compositing pass every frame - pure
+   rendering load stacked on top of the game. Solid, slightly opaque surfaces read the same. */
 
 /* titlebar */
 #titlebar{
@@ -29,13 +31,17 @@ html,body{width:100%;height:100%;background:transparent;overflow:hidden;
   background:linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent)}
 
 .brand-wrap{display:flex;align-items:center;gap:7px;flex:0 0 auto;padding-right:4px;-webkit-app-region:drag}
-.logo{color:var(--accent);font-size:14px;filter:drop-shadow(0 0 6px color-mix(in srgb, var(--accent) 60%, transparent))}
+.logo{color:var(--accent);font-size:14px}
 .brand{font-weight:650;letter-spacing:.2px;font-size:12.5px}
 .count{background:rgba(255,255,255,.07);border-radius:9px;padding:1px 7px;font-size:10.5px;
   color:var(--muted);font-weight:600;-webkit-app-region:no-drag}
 .logdot{width:7px;height:7px;border-radius:50%;background:#f85149;
   box-shadow:0 0 6px #f8514980;transition:background .3s,box-shadow .3s;-webkit-app-region:no-drag}
 .logdot.ok{background:#3fb950;box-shadow:0 0 6px #3fb95080}
+/* At-a-glance lobby summary next to the count: threats (blacklisted / sniper score >= 70) and party size. */
+.chip{border-radius:9px;padding:1px 7px;font-size:10.5px;font-weight:700;-webkit-app-region:no-drag;cursor:default}
+.chip.threat{background:rgba(255,45,85,.16);color:#ff5b7a}
+.chip.party{background:rgba(63,185,80,.14);color:#56d364}
 
 .add{flex:1;-webkit-app-region:drag;display:flex;align-items:center}
 .add input{
@@ -100,6 +106,9 @@ tbody tr.nicked:hover{background:rgba(34,211,238,.17)}
    you" still gets its own star badge in the Source column, so this doesn't need a second color. */
 tbody tr.team{background:rgba(63,185,80,.13);box-shadow:inset 3px 0 0 #3fb950}
 tbody tr.team:hover{background:rgba(63,185,80,.2)}
+/* Quit the pre-game lobby ("X has quit!") - kept, but faded so the list reflects who's still here. */
+tbody tr.left td:not(.actionscell){opacity:.4}
+tbody tr.left .name{text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
 
 .name{font-weight:600}
 /* Always the last cell of every row regardless of which named column is configured last, and
@@ -147,8 +156,7 @@ tbody tr:hover .rmrow{opacity:1}
 .empty{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;gap:6px;color:var(--muted);text-align:center;
   padding:20px;pointer-events:none}
-.empty-icon{font-size:26px;color:var(--accent);opacity:.5;
-  filter:drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 50%, transparent))}
+.empty-icon{font-size:26px;color:var(--accent);opacity:.5}
 .empty-title{font-size:12.5px;font-weight:600;color:var(--text)}
 .empty-sub{font-size:11px;max-width:220px;line-height:1.5}
 .hidden{display:none!important}
@@ -156,8 +164,7 @@ tbody tr:hover .rmrow{opacity:1}
 /* context menu */
 .ctx{position:fixed;background:color-mix(in srgb, var(--header) 92%, #000 8%);
   border:1px solid rgba(255,255,255,.1);border-radius:8px;
-  padding:5px;z-index:50;min-width:175px;box-shadow:0 10px 28px rgba(0,0,0,.55);
-  backdrop-filter:blur(14px)}
+  padding:5px;z-index:50;min-width:175px;box-shadow:0 6px 16px rgba(0,0,0,.5)}
 .ctx .item{padding:6px 10px;font-size:11.5px;border-radius:6px;cursor:pointer;
   display:flex;justify-content:space-between;gap:12px;transition:background .1s}
 .ctx .item:hover{background:var(--accent);color:#fff}
@@ -168,7 +175,7 @@ tbody tr:hover .rmrow{opacity:1}
 /* toasts */
 #toasts{position:fixed;bottom:10px;right:10px;display:flex;flex-direction:column;gap:6px;z-index:60;pointer-events:none}
 .toast{background:color-mix(in srgb, var(--header) 92%, #000 8%);border:1px solid rgba(255,255,255,.08);
-  border-left:3px solid var(--accent);backdrop-filter:blur(14px);
+  border-left:3px solid var(--accent);
   border-radius:8px;padding:8px 13px;font-size:11.5px;max-width:260px;
   animation:slidein .22s cubic-bezier(.2,.8,.2,1);box-shadow:0 6px 18px rgba(0,0,0,.4)}
 .toast.warn{border-left-color:#d29922}
@@ -177,5 +184,5 @@ tbody tr:hover .rmrow{opacity:1}
 
 .tip{position:fixed;background:color-mix(in srgb, #010409 92%, #000);border:1px solid rgba(255,255,255,.1);
   border-radius:8px;padding:9px 11px;font-size:11px;max-width:320px;z-index:70;color:var(--text);
-  box-shadow:0 10px 28px rgba(0,0,0,.5);backdrop-filter:blur(14px);white-space:normal;line-height:1.5}
+  box-shadow:0 6px 16px rgba(0,0,0,.5);white-space:normal;line-height:1.5}
 .tip .row{margin:2px 0}

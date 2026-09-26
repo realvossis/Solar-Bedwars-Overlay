@@ -15,7 +15,7 @@ cd solar-overlay
 cp src/main/secrets.example.js src/main/secrets.js   # then paste your keys into it
 npm install        # installs Electron only
 npm start          # launches the overlay
-npm test           # runs the stat-math unit tests
+npm test           # runs the unit tests (stats, log parsing, roster, config)
 ```
 
 > **Keys / secrets.** `src/main/secrets.js` is **gitignored** and holds your Hypixel + Urchin
@@ -43,8 +43,8 @@ system tray.
 1. **General → Your IGN.** Set your username so the overlay knows who "you" are (mentions, hide-self).
 2. **Log & Detection → Log file path.** Point it at your client log and click *Browse…*.
    Default guesses cover Lunar (`.lunarclient/profiles/<version>/logs/latest.log`, 1.8 first), vanilla, and Badlion.
-   Players are auto-added when you `/who`, join a party, get invites/DMs, get mentioned in chat,
-   or final-kill/get final-killed — all of that is on by default, nothing to flip on manually.
+   Players are auto-added when you `/who`, join a party, get invites/DMs, or get mentioned in chat —
+   all of that is on by default, nothing to flip on manually.
 3. **API Keys → Hypixel key.** Paste your key and hit **Test** to confirm it.
    (Personal keys allow 300 req / 5 min — the app rate-limits itself to stay under that. If you
    have an approved app key, paste it here; raise the cap in code via `hypixel.setRateLimit`.)
@@ -107,22 +107,56 @@ toggle away from being turned off. Add your own endpoints with the same
 Look up a player, then submit a tag (`cheater / sniper / caution / info / toxic / custom`) with a reason,
 `hide_username`, and `overwrite` options. Posts to `{{adminBase}}/admin/add-tag`. Needs an admin key.
 
+### Automatic party tracking
+Your party is kept on the list (green rows, pinned under you) without ever running `/p list`.
+It's built from every signal Hypixel sends: accepting an invite (the leader is added straight away),
+"You'll be partying with…", members joining, **anyone talking in party chat**, summons, promotions
+and transfers. Leaves, kicks and disbands take people back off. Running `/p list` still works and
+is treated as the authoritative roster — but only when every member it announces was parsed, so a
+misread line can never drop a real member. All patterns are anchored to Hypixel's own system
+messages, so nobody can fake a party join by typing it in public chat.
+
+Players who leave the pre-game lobby ("X has quit!") stay listed but faded. The title bar shows
+your party size and a ⚠ count of threats in the lobby (blacklisted, or sniper score ≥ 70).
+
 ### Auto-triggers (Settings → Triggers)
 Auto-flag players to your local watchlist when they: **say your name in chat**, **join your party**,
-**invite you**, **DM you**, **friend-request you**, or **final-kill you**. All six are **on by
-default** — the overlay is meant to work out of the box — but each is an independent toggle if you
-want it quieter.
+**invite you**, **DM you**, or **friend-request you**. All five are **on by default** — the overlay
+is meant to work out of the box — but each is an independent toggle if you want it quieter.
 
 ### Hide from screen capture
 `Settings → Appearance → Hide from screen capture` uses Electron's `setContentProtection`
 (→ `WDA_EXCLUDEFROMCAPTURE` on Windows), so the overlay is invisible to OBS, Discord screen-share,
 and screenshots while still visible to you. On by default.
 
+### Game performance — no OpenGL errors
+The overlay renders on the CPU by default (**Settings → Performance → GPU acceleration**, off).
+With Chromium's GPU compositor running, a transparent always-on-top window sits in the same GPU
+pipeline as Minecraft's OpenGL surface, which some drivers answer with *OpenGL error 1282
+(invalid operation)* in the game. Software rendering keeps the overlay out of that pipeline
+entirely. It also avoids GPU-heavy effects (backdrop blurs) and only touches window z-order /
+capture-exclusion state when those settings actually change.
+
 ### Appearance
 Six built-in themes plus full custom colors, window opacity, font size, row height, always-on-top,
 click-through, and the row highlight settings above.
 
 ---
+
+## Security
+
+- **Keys encrypted at rest.** API keys in `config.json` are sealed with Windows DPAPI (Electron
+  `safeStorage`), tied to your Windows account. Only the Settings window ever receives real keys;
+  every other window sees a redacted placeholder.
+- **Locked-down renderers.** Every window runs sandboxed with context isolation and no Node, behind
+  a strict CSP. Pages can't navigate away, open windows, embed webviews, or request browser
+  permissions (clipboard write only). IPC only accepts calls from the app's own windows, and every
+  argument is validated.
+- **Safe outbound traffic.** Links only open `https` URLs on a small allowlist (Plancke, NameMC,
+  Hypixel, Urchin, GitHub). Endpoints that carry a key must be `https` (plain `http` is allowed only
+  to `localhost`). Every request has a timeout.
+- **Hardened binary.** Release builds ship with Electron fuses set: no run-as-Node, no
+  `NODE_OPTIONS`/inspector flags, and asar integrity validation.
 
 ## Project layout
 
@@ -131,7 +165,7 @@ solar-overlay/
 ├─ package.json
 ├─ data/blacklist.json         # bundled local blacklist import, keyed by UUID
 ├─ assets/icon.png
-├─ test/stats.test.js          # pure stat-math tests (npm test)
+├─ test/                      # unit tests: stats, log parsing, roster, config (npm test)
 └─ src/
    ├─ main/
    │  ├─ main.js               # windows, capture-hiding, IPC, triggers, tray, shortcuts
@@ -139,7 +173,8 @@ solar-overlay/
    │  ├─ hypixel.js            # Hypixel + Mojang, cache, rate-limit, daily snapshots
    │  ├─ stats.js              # star/FKDR/WLR/monthly + sniper score (pure, tested)
    │  ├─ urchin.js             # Urchin + Connections + local blacklist merge + admin add-tag
-   │  ├─ logWatcher.js         # tails the client log, parses chat events
+   │  ├─ logWatcher.js         # tails the client log, parses chat + party events
+   │  ├─ net.js                # request timeouts + https-only endpoint guard
    │  ├─ roster.js             # combines everything into the live player list
    │  └─ preload.js            # secure IPC bridge
    └─ renderer/
@@ -162,6 +197,8 @@ git grep -nE "key=[0-9a-fA-F]{8}-" $(git rev-parse HEAD) || echo "no embedded ke
 - Double-check the Urchin tag shape on your own machine — the parser is defensive and follows the
   documented `{ score:{value,mode}, tags:[…] }` format, but if your instance returns extra fields
   you want shown, they're easy to surface in `urchin.js → _parseTag`.
-- To package a Windows `.exe` later: add `electron-builder`, a `build` block, and run `electron-builder`.
+- To package the Windows installer + portable `.exe`: `npm run dist` (output in `dist/`).
+- For development against a throwaway profile (never touches your real config/keys):
+  `SOLAR_USER_DATA=./.devprofile npm start` — ignored in packaged builds.
 - Log formats vary by client. If detection misses something, paste a sample line and the regexes in
   `logWatcher.js` are straightforward to extend.

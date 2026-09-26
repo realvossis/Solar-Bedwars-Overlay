@@ -4,13 +4,15 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { app } = require('electron');
+const { app, safeStorage } = require('electron');
 
 // Secrets are kept OUT of version control (see .gitignore + secrets.example.js).
 // Copy secrets.example.js -> secrets.js and fill in your keys. Missing file = empty
 // defaults, and you can still paste keys in Settings (they save to userData, not the repo).
 let secrets = {};
 try { secrets = require('./secrets'); } catch (_) {}
+
+const CONFIG_VERSION = 2;
 
 function guessLogPath() {
   // Sensible Windows defaults. User can override in Settings.
@@ -75,7 +77,7 @@ const ALL_COLUMNS = [
 
 function defaults() {
   return {
-    version: 1,
+    version: CONFIG_VERSION,
 
     // ---- API keys (loaded from gitignored secrets.js; also editable in Settings) ----
     hypixelKey: secrets.hypixelKey || '',
@@ -119,7 +121,6 @@ function defaults() {
       onPartyInvite: true,
       onDirectMessage: true,
       onFriendRequest: true,
-      onKilledYou: true,
     },
     autoTagType: 'info',
     watchlist: {}, // { uuid: {reason, added_on, name} } local-only soft flags
@@ -128,6 +129,12 @@ function defaults() {
     refreshSeconds: 0,  // 0 = only fetch on detection (lightweight)
     concurrency: 4,
     cacheMinutes: 3,
+    // Off by default: with GPU acceleration on, Chromium runs its own D3D/GL compositor for this
+    // transparent, always-on-top window right on top of Minecraft's OpenGL surface, which some
+    // drivers answer with GL_INVALID_OPERATION (1282) spam in the game. A small table renders just
+    // as smoothly on the CPU, and this keeps the overlay entirely out of the game's GPU pipeline.
+    // Read before app 'ready' (see readEarly), so changing it needs a restart.
+    gpuAcceleration: false,
 
     // ---- Overlay window ----
     // Wide enough to fit every default column (now with per-column widths actually applied,
@@ -201,11 +208,24 @@ function file() {
   return filePath;
 }
 
+// Keys that would let a crafted patch (from a renderer, or a hand-edited config.json) reach an
+// object's prototype through deepMerge - dropped everywhere, at any depth.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+function sanitize(v, depth = 0) {
+  if (depth > 12) return undefined;
+  if (Array.isArray(v)) return v.map((x) => sanitize(x, depth + 1));
+  if (!v || typeof v !== 'object') return v;
+  const out = {};
+  for (const k of Object.keys(v)) if (!FORBIDDEN_KEYS.has(k)) out[k] = sanitize(v[k], depth + 1);
+  return out;
+}
+
 function deepMerge(base, over) {
   if (Array.isArray(base) || Array.isArray(over)) return over === undefined ? base : over;
   if (typeof base !== 'object' || base === null) return over === undefined ? base : over;
   const out = { ...base };
   for (const k of Object.keys(over || {})) {
+    if (FORBIDDEN_KEYS.has(k)) continue;
     if (over[k] && typeof over[k] === 'object' && !Array.isArray(over[k]) && typeof base[k] === 'object') {
       out[k] = deepMerge(base[k], over[k]);
     } else {
@@ -215,27 +235,112 @@ function deepMerge(base, over) {
   return out;
 }
 
+// ---- API keys at rest ----
+// Keys are sealed with Electron's safeStorage (DPAPI on Windows - tied to this Windows user
+// account) before config.json hits disk, so the file alone is useless if it gets copied, synced,
+// or attached to a bug report. In memory they stay plaintext; that's what the API calls need.
+// If encryption isn't available on this machine they're written as before rather than lost.
+const ENC_PREFIX = 'enc:v1:';
+const SECRET_KEYS = ['hypixelKey', 'urchinKey', 'urchinAdminKey'];
+// What non-Settings windows see in place of a real key: enough to know "one is set", nothing more.
+const REDACTED = '••••••••';
+
+function canEncrypt() {
+  try { return !!(safeStorage && safeStorage.isEncryptionAvailable()); } catch (_) { return false; }
+}
+function sealSecret(v) {
+  if (typeof v !== 'string' || !v || v.startsWith(ENC_PREFIX) || !canEncrypt()) return v;
+  try { return ENC_PREFIX + safeStorage.encryptString(v).toString('base64'); } catch (_) { return v; }
+}
+function openSecret(v) {
+  if (typeof v !== 'string' || !v.startsWith(ENC_PREFIX)) return v;
+  // Undecryptable (config copied from another PC/user): the key is gone either way - the user
+  // just re-enters it in Settings, same as a fresh install.
+  try { return safeStorage.decryptString(Buffer.from(v.slice(ENC_PREFIX.length), 'base64')); } catch (_) { return ''; }
+}
+function mapSecrets(obj, fn) {
+  const out = { ...obj };
+  for (const k of SECRET_KEYS) if (k in out) out[k] = fn(out[k]);
+  if (Array.isArray(out.connections)) {
+    out.connections = out.connections.map((c) => (c && typeof c === 'object' && 'key' in c ? { ...c, key: fn(c.key) } : c));
+  }
+  return out;
+}
+function redact(cfg) { return mapSecrets(cfg, (v) => (v ? REDACTED : '')); }
+
+// A renderer that only ever saw redacted keys must never be able to write the placeholder back
+// over the real key - drop those fields (and restore connection keys by id) before merging.
+function dropRedacted(patch, current) {
+  const out = { ...patch };
+  for (const k of SECRET_KEYS) if (out[k] === REDACTED) delete out[k];
+  if (Array.isArray(out.connections)) {
+    const byId = new Map((current.connections || []).map((c) => [c && c.id, c]));
+    out.connections = out.connections.map((c) => (c && c.key === REDACTED ? { ...c, key: (byId.get(c.id) || {}).key || '' } : c));
+  }
+  return out;
+}
+
+// ---- migrations for configs saved by older versions ----
+function migrate(saved) {
+  const s = { ...saved };
+  if ((s.version || 1) < 2) {
+    // v2 dropped the "final-killed you" trigger: its kill-feed match fired on every final kill in
+    // the lobby, not just yours, so it mislabelled players (including you). Remove the toggle and
+    // the bogus watchlist flags it left behind.
+    if (s.triggers && typeof s.triggers === 'object') { s.triggers = { ...s.triggers }; delete s.triggers.onKilledYou; }
+    if (s.watchlist && typeof s.watchlist === 'object') {
+      s.watchlist = Object.fromEntries(Object.entries(s.watchlist).filter(([, v]) => !(v && v.reason === 'final-killed you')));
+    }
+  }
+  s.version = CONFIG_VERSION;
+  return s;
+}
+
+function writeFile() {
+  try {
+    fs.mkdirSync(path.dirname(file()), { recursive: true });
+    // Write-then-rename so a crash mid-write can't leave a truncated config.json behind.
+    const tmp = file() + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(mapSecrets(cache, sealSecret), null, 2));
+    fs.renameSync(tmp, file());
+  } catch (e) { console.error('config save failed', e); }
+}
+
+// Must only run after app 'ready' - safeStorage can't decrypt before then.
 function load() {
   if (cache) return cache;
-  let saved = {};
-  try { saved = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch (_) {}
-  cache = deepMerge(defaults(), saved);
+  let saved = null;
+  try { saved = sanitize(JSON.parse(fs.readFileSync(file(), 'utf8'))); } catch (_) {}
+  if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = null;
+  let hasPlainKey = false;
+  if (saved) mapSecrets(saved, (v) => { if (typeof v === 'string' && v && !v.startsWith(ENC_PREFIX)) hasPlainKey = true; return v; });
+  const outdated = !!saved && (saved.version || 1) < CONFIG_VERSION;
+  cache = deepMerge(defaults(), saved ? migrate(mapSecrets(saved, openSecret)) : {});
+  // Re-save once so plaintext keys from older versions get encrypted and migrations persist.
+  if (outdated || (hasPlainKey && canEncrypt())) writeFile();
   return cache;
 }
 
-function save(patch) {
-  cache = deepMerge(load(), patch || {});
+// Reads one top-level value straight off disk, bypassing the cache and decryption - for the few
+// settings (GPU acceleration) that have to be decided before app 'ready'.
+function readEarly(key, fallback) {
   try {
-    fs.mkdirSync(path.dirname(file()), { recursive: true });
-    fs.writeFileSync(file(), JSON.stringify(cache, null, 2));
-  } catch (e) { console.error('config save failed', e); }
+    const j = JSON.parse(fs.readFileSync(file(), 'utf8'));
+    return Object.prototype.hasOwnProperty.call(j, key) ? j[key] : fallback;
+  } catch (_) { return fallback; }
+}
+
+function save(patch) {
+  const current = load();
+  cache = deepMerge(current, dropRedacted(sanitize(patch || {}) || {}, current));
+  writeFile();
   return cache;
 }
 
 function reset() {
   cache = defaults();
-  save({});
+  writeFile();
   return cache;
 }
 
-module.exports = { load, save, reset, defaults, ALL_COLUMNS };
+module.exports = { load, save, reset, defaults, redact, readEarly, ALL_COLUMNS, REDACTED, CONFIG_VERSION, _internal: { migrate, sanitize, sealSecret, openSecret } };

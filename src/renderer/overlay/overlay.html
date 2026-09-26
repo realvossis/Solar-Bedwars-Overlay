@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none';" />
   <link rel="stylesheet" href="overlay.css" />
 </head>
 <body>
@@ -13,6 +13,8 @@
         <span class="brand">Solar</span>
         <span id="count" class="count">0</span>
         <span id="logdot" class="logdot" title="log watcher"></span>
+        <span id="partyChip" class="chip party hidden"></span>
+        <span id="threatChip" class="chip threat hidden"></span>
       </div>
       <div class="add">
         <input id="addInput" placeholder="add player…" spellcheck="false" />

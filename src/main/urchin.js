@@ -7,6 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { withTimeout, isSafeEndpoint } = require('./net');
 
 // Tag severity -> feeds the sniper score and picks a color. Real tag_type values
 // seen from the local database export ('legit_sniper', 'caution', 'account') and
@@ -209,8 +210,10 @@ class Urchin {
     if (cfg.urchinEnabled !== false) {
       try {
         const url = this._buildUrl(cfg.urchinEndpoint, id, name, cfg.urchinKey);
-        if (url) {
-          const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (url && !isSafeEndpoint(url)) {
+          out.error = 'urchin endpoint must be https';
+        } else if (url) {
+          const r = await fetch(url, withTimeout({ headers: { Accept: 'application/json' } }));
           if (r.ok) {
             const j = await r.json().catch(() => ({}));
             out.raw.urchin = j; // full response kept so a column can map to any field in it
@@ -234,7 +237,8 @@ class Urchin {
       if (!conn.enabled || !conn.endpoint) continue;
       try {
         const url = this._buildUrl(conn.endpoint, id, name, conn.key);
-        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!isSafeEndpoint(url)) continue; // never send a connection's key over plain http
+        const r = await fetch(url, withTimeout({ headers: { Accept: 'application/json' } }));
         if (!r.ok) continue;
         const j = await r.json().catch(() => ({}));
         out.raw[conn.id] = j;
@@ -292,7 +296,7 @@ class Urchin {
     if (!cfg.urchinKey) return null;
     try {
       const url = 'https://api.urchin.gg/v3/player/sessions/monthly?player=' + encodeURIComponent(norm(uuid) || name || '');
-      const r = await fetch(url, { headers: { 'X-API-Key': cfg.urchinKey } });
+      const r = await fetch(url, withTimeout({ headers: { 'X-API-Key': cfg.urchinKey } }));
       if (!r.ok) return null;
       return await r.json();
     } catch (_) { return null; }
@@ -306,7 +310,7 @@ class Urchin {
     if (!cfg.urchinKey) return null;
     try {
       const url = 'https://api.urchin.gg/v3/player/winstreaks?player=' + encodeURIComponent(norm(uuid) || name || '');
-      const r = await fetch(url, { headers: { 'X-API-Key': cfg.urchinKey } });
+      const r = await fetch(url, withTimeout({ headers: { 'X-API-Key': cfg.urchinKey } }));
       if (!r.ok) return null;
       return await r.json();
     } catch (_) { return null; }
@@ -316,12 +320,14 @@ class Urchin {
   async addTag({ uuid, tag_type, reason, hide_username = false, overwrite = false }) {
     const cfg = this.getConfig();
     if (!cfg.urchinAdminKey) throw new Error('No admin key set (Settings → Urchin).');
-    const url = cfg.urchinAdminBase.replace(/\/$/, '') + '/admin/add-tag?key=' + encodeURIComponent(cfg.urchinAdminKey);
-    const r = await fetch(url, {
+    const base = String(cfg.urchinAdminBase || '').replace(/\/$/, '');
+    if (!isSafeEndpoint(base)) throw new Error('Admin base URL must be https.');
+    const url = base + '/admin/add-tag?key=' + encodeURIComponent(cfg.urchinAdminKey);
+    const r = await fetch(url, withTimeout({
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid: norm(uuid), tag_type, reason, hide_username, overwrite }),
-    });
+      body: JSON.stringify({ uuid: norm(uuid), tag_type, reason, hide_username: !!hide_username, overwrite: !!overwrite }),
+    }));
     const body = await r.json().catch(() => ({}));
     if (r.status === 200) return { ok: true, message: body.message || 'Tag added.' };
     const msgs = { 400: 'Invalid tag type', 401: 'Invalid API key', 403: 'Admin access required', 409: 'Tag already exists (enable overwrite)' };

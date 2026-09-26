@@ -9,13 +9,20 @@
 //   chatSpeaker(name)   - whoever just said anything in normal chat - a catch-all presence signal
 //                         independent of the exact join-message wording above
 //   quit(name)          - "X has quit!"
-//   partyJoin(names[])  - joined your party
-//   partyList(names[])  - full party list
+//   partyJoin(names[])  - joined your party / "You'll be partying with: ..."
+//   partyJoined(leader) - YOU joined someone else's party ("You have joined X's party!")
+//   partyMember(name)   - someone proven to be in your party right now: party chat, a summon, a
+//                         promotion/transfer, inviting someone else - so members get picked up
+//                         without anyone having to run /p list
+//   partyList(names[])  - one "Party Leader/Moderators/Members:" line of /p list
+//   partyRoster(names[])- the complete /p list, once every member it announced has been parsed -
+//                         authoritative, so anyone not in it is no longer in the party
+//   partyLeave(name)    - someone left / was kicked / was removed from your party
+//   partyDisband()      - you left, got kicked, the party was disbanded, or you're not in one
 //   partyInvite(name)   - invited you
 //   friendRequest(name) - friend request
 //   dmFrom(name), dmTo(name)
 //   mention({by,text})  - your name said in chat
-//   killedYou(name)     - a final-kill message crediting a player
 //   finalKillCount({killer,victim,count}) - a kill line carrying the killer's lifetime final-kill
 //                         tally (e.g. "Victim was Killer's #3560 FINAL KILL!") — the only lead we
 //                         get on a nicked killer's real identity, see hypixel.findByFinalKills()
@@ -41,6 +48,40 @@ function chatOf(line) {
   return clean.trim();
 }
 function validName(n) { return /^[A-Za-z0-9_]{1,16}$/.test(n); }
+// Zero or more "[RANK] " prefixes in front of a name.
+const RANKS = '(?:\\[[^\\]]+\\]\\s*)*';
+// Every party/social pattern below is anchored at the start of the message. Player chat always
+// starts with the sender's own "[RANK] Name: ", so anchoring is what stops someone from typing
+// "Bob joined the party" in public chat and getting Bob treated as your party member.
+const rx = (body) => new RegExp('^' + body);
+const P = {
+  youJoined: rx('You have joined ' + RANKS + '(' + NAME + ")'s party"),
+  memberJoined: rx(RANKS + '(' + NAME + ') (?:has )?joined the party'),
+  partyingWith: /^You'll be partying with:\s*(.+)$/,
+  rosterHeader: /^Party Members \((\d+)\)/,
+  rosterLine: /^Party (?:Members|Leader|Moderators):/,
+  summoned: rx('Party Leader,? ' + RANKS + '(' + NAME + '),? summoned you'),
+  promoted: rx(RANKS + '(' + NAME + ') has promoted ' + RANKS + '(' + NAME + ') to Party'),
+  transferredLeft: rx('The party was transferred to ' + RANKS + '(' + NAME + ') because ' + RANKS + '(' + NAME + ') left'),
+  transferredBy: rx('The party was transferred to ' + RANKS + '(' + NAME + ') by ' + RANKS + '(' + NAME + ')'),
+  invitedOther: rx(RANKS + '(' + NAME + ') invited ' + RANKS + '(' + NAME + ') to the party'),
+  left: rx(RANKS + '(' + NAME + ') has left the party'),
+  removed: rx(RANKS + '(' + NAME + ') has been removed from the party'),
+  kickedOffline: rx('Kicked ' + RANKS + '(' + NAME + ') because they were offline'),
+  disconnected: rx(RANKS + '(' + NAME + ') was removed from your party because they disconnected'),
+  disband: /^(?:You left the party|You are not (?:currently )?in a party|The party was disbanded|You have been kicked from the party)/,
+  disbandedBy: rx(RANKS + NAME + ' has disbanded the party'),
+  invitedYou: rx(RANKS + '(' + NAME + ') has invited you to join'),
+  friendReq1: rx(RANKS + '(' + NAME + ') has sent you a friend request'),
+  friendReq2: rx('Friend request from ' + RANKS + '(' + NAME + ')'),
+};
+// Hypixel frames multi-line replies (like /p list) with a long run of dashes.
+const SEPARATOR = /^[-=▬]{8,}$/;
+// Splits one "Party Members: [MVP+] A ● [VIP] B ●" line into names. The ● bullet never survives
+// the log's Latin-1 decoding intact (it arrives as "?" or mojibake), so whitespace is what really
+// separates entries here - rank tags and bullet debris just fail validName and drop out.
+const namesFrom = (list) => list.split(/[\s,●]+/).map(stripRank).filter(validName);
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 class LogWatcher extends EventEmitter {
   constructor() {
@@ -52,10 +93,16 @@ class LogWatcher extends EventEmitter {
     this.timer = null;
     this.buffer = '';
     this.selfNames = [];
+    this._selfRe = null;
     this._ok = false;
+    this._roster = null; // in-progress /p list: { expected, names }
   }
 
-  setSelfNames(names) { this.selfNames = (names || []).filter(Boolean).map((n) => n.toLowerCase()); }
+  setSelfNames(names) {
+    this.selfNames = (names || []).filter(Boolean).map((n) => String(n).trim().toLowerCase()).filter(validName);
+    // Whole-word match, so an IGN like "Ace" isn't "mentioned" by every "race"/"face" in chat.
+    this._selfRe = this.selfNames.length ? new RegExp('(?:^|[^a-z0-9_])(?:' + this.selfNames.map(escapeRe).join('|') + ')(?![a-z0-9_])', 'i') : null;
+  }
 
   start(logPath) {
     this.stop();
@@ -75,7 +122,7 @@ class LogWatcher extends EventEmitter {
 
   stop() {
     if (this.timer) clearInterval(this.timer);
-    this.timer = null; this.buffer = '';
+    this.timer = null; this.buffer = ''; this._roster = null;
   }
 
   _poll() {
@@ -157,28 +204,10 @@ class LogWatcher extends EventEmitter {
     m = msg.match(new RegExp('^Attempting to teleport you to (?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')\'s house'));
     if (m) { this.emit('houseEntered', m[1]); return; }
 
-    // ---- party invite: "X has invited you to join their party!" ----
-    m = msg.match(new RegExp('(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') has invited you to join'));
-    if (m) { this.emit('partyInvite', m[1]); return; }
+    if (this._parseParty(msg)) return;
 
-    // ---- party join: "X joined the party." / "X has joined the party!" ----
-    m = msg.match(new RegExp('(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') (?:has )?joined the party'));
-    if (m) { this.emit('partyJoin', [m[1]]); return; }
-    // "You'll be partying with: a, b, c"
-    m = msg.match(/You'll be partying with:\s*(.+)$/);
-    if (m) { const names = m[1].split(',').map(stripRank).filter(validName); if (names.length) this.emit('partyJoin', names); return; }
-
-    // ---- party list lines: "Party Members: a b c" / "Party Leader: X" / "Party Moderators:" ----
-    if (/^Party (Members|Leader|Moderators):/.test(msg)) {
-      const names = (msg.split(':')[1] || '').split(/[\s,●]+/).map(stripRank).filter(validName);
-      if (names.length) this.emit('partyList', names);
-      return;
-    }
-
-    // ---- friend request: "X has sent you a friend request!" ----
-    m = msg.match(new RegExp('(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') has sent you a friend request'));
-    if (m) { this.emit('friendRequest', m[1]); return; }
-    m = msg.match(/Friend request from (?:\[[^\]]+\]\s*)*(\w{1,16})/);
+    // ---- friend request: "X has sent you a friend request!" / "Friend request from X" ----
+    m = msg.match(P.friendReq1) || msg.match(P.friendReq2);
     if (m) { this.emit('friendRequest', m[1]); return; }
 
     // ---- direct messages: "From [rank] Name: text" / "To Name: text" ----
@@ -187,13 +216,8 @@ class LogWatcher extends EventEmitter {
     m = msg.match(new RegExp('^To (?:\\[[^\\]]+\\]\\s*)*(' + NAME + '):\\s*(.*)$'));
     if (m) { this.emit('dmTo', m[1]); return; }
 
-    // ---- final kill crediting a player (best-effort): "... FINAL KILL! ... by Name" not standard;
-    //      Hypixel uses "<victim> was killed by <killer>. FINAL KILL!" ----
-    m = msg.match(new RegExp('was (?:final killed|killed) by (?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')'));
-    if (m && /FINAL KILL|final killed/i.test(msg)) { this.emit('killedYou', m[1]); /* fallthrough for mention */ }
-
     // ---- kill line carrying the killer's running lifetime final-kill count, e.g.
-    //      "Victim was Killer's #3560 FINAL KILL!" — a possessive variant of the line above that
+    //      "Victim was Killer's #3560 FINAL KILL!" — a possessive kill-line variant that
     //      some clients/servers show. This is speculative pending a real sample; the wording here
     //      matches what was described, so tune it once an actual log line is available.
     m = msg.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') was (?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')\'s #?(\\d+)(?:st|nd|rd|th)?\\s+FINAL KILL', 'i'));
@@ -242,14 +266,62 @@ class LogWatcher extends EventEmitter {
     const cm = isChatLine && body.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')(?:\\s*\\[[^\\]]+\\])*\\s*:\\s*(.*)$'));
     if (cm) {
       if (!hasChannelPrefix) this.emit('chatSpeaker', cm[1]);
-      if (this.selfNames.length) {
-        const speaker = cm[1].toLowerCase();
-        const text = cm[2].toLowerCase();
-        if (!this.selfNames.includes(speaker) && this.selfNames.some((n) => text.includes(n))) {
-          this.emit('mention', { by: cm[1], text: cm[2] });
-        }
+      // Anyone talking in party chat is, by definition, in your party right now - the most common
+      // way members show up without anybody running /p list.
+      else if (/^Party\s*>/i.test(msg) && !this._isSelf(cm[1])) this.emit('partyMember', cm[1]);
+      if (this._selfRe && !this._isSelf(cm[1]) && this._selfRe.test(cm[2])) {
+        this.emit('mention', { by: cm[1], text: cm[2] });
       }
     }
+  }
+
+  _isSelf(name) { return this.selfNames.includes(String(name).toLowerCase()); }
+
+  // Everything party-related. Returns true once the line has been fully handled.
+  _parseParty(msg) {
+    let m;
+    // /p list arrives as a block: "Party Members (N)", then Leader/Moderators/Members lines, then
+    // a dash separator. Collect it so the complete list can be reconciled once all N are in.
+    m = msg.match(P.rosterHeader);
+    if (m) { this._roster = { expected: parseInt(m[1], 10), names: [] }; return true; }
+    if (P.rosterLine.test(msg)) {
+      const names = namesFrom(msg.slice(msg.indexOf(':') + 1));
+      if (names.length) this.emit('partyList', names);
+      if (this._roster) {
+        this._roster.names.push(...names);
+        // Only a list that accounts for every announced member is trusted to remove anyone - a
+        // line we failed to parse must never make real members disappear.
+        if (this._roster.names.length === this._roster.expected) { this.emit('partyRoster', this._roster.names); this._roster = null; }
+      }
+      return true;
+    }
+    if (this._roster && SEPARATOR.test(msg)) { this._roster = null; return false; }
+
+    m = msg.match(P.youJoined);
+    if (m) { this.emit('partyJoined', m[1]); return true; }
+    m = msg.match(P.partyingWith);
+    if (m) { const names = namesFrom(m[1]); if (names.length) this.emit('partyJoin', names); return true; }
+    m = msg.match(P.memberJoined);
+    if (m) { this.emit('partyJoin', [m[1]]); return true; }
+
+    m = msg.match(P.invitedYou);
+    if (m) { this.emit('partyInvite', m[1]); return true; }
+    // "A invited B to the party!" - A is already in your party (B isn't until they accept).
+    m = msg.match(P.invitedOther);
+    if (m) { if (!this._isSelf(m[1])) this.emit('partyMember', m[1]); return true; }
+    m = msg.match(P.summoned);
+    if (m) { this.emit('partyMember', m[1]); return true; }
+    m = msg.match(P.promoted);
+    if (m) { for (const n of [m[1], m[2]]) if (!this._isSelf(n)) this.emit('partyMember', n); return true; }
+    m = msg.match(P.transferredLeft);
+    if (m) { if (!this._isSelf(m[1])) this.emit('partyMember', m[1]); this.emit('partyLeave', m[2]); return true; }
+    m = msg.match(P.transferredBy);
+    if (m) { for (const n of [m[1], m[2]]) if (!this._isSelf(n)) this.emit('partyMember', n); return true; }
+
+    m = msg.match(P.left) || msg.match(P.removed) || msg.match(P.kickedOffline) || msg.match(P.disconnected);
+    if (m) { this.emit('partyLeave', m[1]); return true; }
+    if (P.disband.test(msg) || P.disbandedBy.test(msg)) { this.emit('partyDisband'); return true; }
+    return false;
   }
 }
 
