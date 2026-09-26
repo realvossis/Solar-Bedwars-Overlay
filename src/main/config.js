@@ -196,6 +196,17 @@ function defaults() {
     // every player on the overlay - see nameRules.js. Matches get highlighted, optionally toasted.
     nameWatch: { enabled: true, notify: true, rules: [] },
 
+    // ---- Notifications (corner popups + sounds; see notifications.js) ----
+    // Popups never take focus from the game. Each event can show a popup and/or play a sound.
+    notifications: {
+      enabled: true, position: 'bottom-right', durationSec: 7, sound: true, volume: 0.6, threatMinSniper: 70,
+      events: {
+        nickMatch: { popup: true, sound: true }, mention: { popup: true, sound: true }, dm: { popup: true, sound: true },
+        partyInvite: { popup: true, sound: true }, friendRequest: { popup: true, sound: false },
+        threat: { popup: true, sound: true }, nameWatch: { popup: true, sound: true },
+      },
+    },
+
     // ---- Nick roller (Alt+N with Hypixel's random-name book open; see nickRoller.js) ----
     // A rolled name is accepted when it passes every enabled check AND matches at least one rule
     // (if any rules are set). jarPath optionally points at a Minecraft 1.8.9 jar for the font.

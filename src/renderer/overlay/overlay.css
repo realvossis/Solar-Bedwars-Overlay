@@ -1,193 +1,163 @@
 :root{
   --bg:#0d1117; --header:#161b22; --text:#e6edf3; --accent:#58a6ff; --grid:#21262d;
   --font:13px; --row:22px; --muted:#8b949e;
+  --line:rgba(255,255,255,.055); --hover:rgba(255,255,255,.045);
+  --ok:#3fb950; --warn:#e3b341; --bad:#f85149; --party:#3fb950; --nick:#22d3ee; --watch:#bc8cff;
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;background:transparent;overflow:hidden;
-  font-family:'Segoe UI',Roboto,system-ui,sans-serif;color:var(--text);
-  -webkit-user-select:none;user-select:none;cursor:default;font-size:var(--font)}
+  font-family:'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;color:var(--text);
+  -webkit-user-select:none;user-select:none;cursor:default;font-size:var(--font);
+  -webkit-font-smoothing:antialiased}
 
-#app{
-  display:flex;flex-direction:column;height:100vh;
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0) 40px),
-    var(--bg);
-  border:1px solid rgba(255,255,255,.09);
-  border-radius:12px;overflow:hidden;
-  box-shadow:0 0 0 1px rgba(0,0,0,.2) inset;
-}
 /* No backdrop-filter/drop-shadow anywhere in this window: on a transparent overlay they blur
    nothing visible, yet each one forces an extra offscreen compositing pass every frame - pure
    rendering load stacked on top of the game. Solid, slightly opaque surfaces read the same. */
+#app{display:flex;flex-direction:column;height:100vh;background:var(--bg);
+  border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden}
 
-/* titlebar */
-#titlebar{
-  -webkit-app-region:drag;
-  display:flex;align-items:center;gap:8px;height:34px;padding:0 8px 0 10px;
-  background:linear-gradient(180deg, var(--header), color-mix(in srgb, var(--header) 88%, #000));
-  border-bottom:1px solid rgba(255,255,255,.06);flex:0 0 auto;position:relative}
-#titlebar::after{
-  content:'';position:absolute;left:0;right:0;bottom:-1px;height:1px;
-  background:linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent), transparent)}
+[data-icon] svg{display:block}
 
-.brand-wrap{display:flex;align-items:center;gap:7px;flex:0 0 auto;padding-right:4px;-webkit-app-region:drag}
-.logo{color:var(--accent);font-size:14px}
-.brand{font-weight:650;letter-spacing:.2px;font-size:12.5px}
-.count{background:rgba(255,255,255,.07);border-radius:9px;padding:1px 7px;font-size:10.5px;
-  color:var(--muted);font-weight:600;-webkit-app-region:no-drag}
-.logdot{width:7px;height:7px;border-radius:50%;background:#f85149;
-  box-shadow:0 0 6px #f8514980;transition:background .3s,box-shadow .3s;-webkit-app-region:no-drag}
-.logdot.ok{background:#3fb950;box-shadow:0 0 6px #3fb95080}
-/* At-a-glance lobby summary next to the count: threats (blacklisted / sniper score >= 70) and party size. */
-.chip{border-radius:9px;padding:1px 7px;font-size:10.5px;font-weight:700;-webkit-app-region:no-drag;cursor:default}
-.chip.threat{background:rgba(255,45,85,.16);color:#ff5b7a}
-.chip.party{background:rgba(63,185,80,.14);color:#56d364}
-.chip.roll{background:rgba(188,140,255,.18);color:#d2b8ff;cursor:pointer;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* ---------- titlebar ---------- */
+#titlebar{-webkit-app-region:drag;display:flex;align-items:center;gap:10px;height:36px;padding:0 6px 0 11px;
+  background:var(--header);border-bottom:1px solid var(--line);flex:0 0 auto}
+.brand-wrap{display:flex;align-items:center;gap:7px;flex:0 0 auto}
+.logo{display:flex}
+.brand{font-weight:600;font-size:12.5px;letter-spacing:.2px;margin-right:2px}
+.count{min-width:20px;text-align:center;background:rgba(255,255,255,.07);border-radius:10px;padding:1px 7px;
+  font-size:10.5px;color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.logdot{width:6px;height:6px;border-radius:50%;background:var(--bad);transition:background .3s}
+.logdot.ok{background:var(--ok)}
+/* At-a-glance lobby summary: party size, threats (blacklisted / sniper >= 70), nick roller. */
+.chip{display:inline-flex;align-items:center;gap:4px;height:19px;border-radius:10px;padding:0 7px 0 6px;
+  font-size:10.5px;font-weight:600;font-variant-numeric:tabular-nums;-webkit-app-region:no-drag}
+.chip i{display:flex}
+.chip i svg{width:11px;height:11px}
+.chip.threat{background:rgba(248,81,73,.14);color:#ff7b72}
+.chip.party{background:rgba(63,185,80,.13);color:#56d364}
+.chip.roll{background:rgba(188,140,255,.16);color:#d2b8ff;cursor:pointer;max-width:230px}
+.chip.roll b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 
-.add{flex:1;-webkit-app-region:drag;display:flex;align-items:center}
-.add input{
-  -webkit-app-region:no-drag;
-  width:100%;max-width:190px;background:rgba(255,255,255,.05);
-  border:1px solid rgba(255,255,255,.08);
-  color:var(--text);border-radius:6px;padding:4px 9px;font-size:11.5px;outline:none;
-  transition:border-color .15s,background .15s}
+.add{flex:1;display:flex;align-items:center;min-width:60px}
+.add input{-webkit-app-region:no-drag;width:100%;max-width:180px;height:24px;background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);color:var(--text);border-radius:6px;padding:0 9px;font-size:11.5px;
+  outline:none;font-family:inherit;transition:border-color .15s,background .15s}
 .add input::placeholder{color:var(--muted)}
-.add input:hover{background:rgba(255,255,255,.07)}
-.add input:focus{border-color:var(--accent);background:rgba(255,255,255,.08)}
+.add input:hover{background:rgba(255,255,255,.06)}
+.add input:focus{border-color:var(--accent);background:rgba(255,255,255,.06)}
 
-.btns{-webkit-app-region:no-drag;display:flex;align-items:center;gap:1px}
-.btns button{
-  background:transparent;border:none;color:var(--muted);cursor:pointer;
-  font-size:12.5px;width:25px;height:25px;border-radius:6px;line-height:1;
-  display:flex;align-items:center;justify-content:center;
-  transition:background .12s,color .12s,transform .08s}
-.btns button span{transition:transform .12s}
-.btns button:hover{background:rgba(255,255,255,.08);color:var(--text)}
-.btns button:active span{transform:scale(.88)}
-.btn-sep{width:1px;height:16px;background:rgba(255,255,255,.09);margin:0 4px}
-.win-ctrl:hover{background:rgba(255,255,255,.1)}
+.btns{-webkit-app-region:no-drag;display:flex;align-items:center;gap:2px}
+.btns button{background:transparent;border:none;color:var(--muted);cursor:pointer;width:26px;height:26px;
+  border-radius:6px;display:flex;align-items:center;justify-content:center;transition:background .12s,color .12s}
+.btns button:hover{background:rgba(255,255,255,.07);color:var(--text)}
+.btns button:active svg{transform:scale(.9)}
+.btn-sep{width:1px;height:16px;background:var(--line);margin:0 4px}
 .win-ctrl.close:hover{background:#da3633;color:#fff}
-.on{color:var(--accent)!important;background:color-mix(in srgb, var(--accent) 16%, transparent)!important}
+.on{color:var(--accent)!important;background:color-mix(in srgb, var(--accent) 15%, transparent)!important}
 
-/* table */
-/* overflow-x:auto (not hidden) because the table's width is now the real sum of each column's
-   own pixel width (see renderHead()'s <colgroup>) rather than always matching the container —
-   if there are more/wider columns than the window can show, you can scroll instead of everything
-   getting clipped or squeezed down to nothing. */
-#tableWrap{flex:1;overflow-y:auto;overflow-x:auto;position:relative}
-#tableWrap::-webkit-scrollbar{width:7px;height:7px}
+/* ---------- table ---------- */
+/* overflow-x:auto: the table's width is the real sum of each column's own width (see renderHead's
+   <colgroup>), so extra columns scroll instead of squeezing everything down to nothing. */
+#tableWrap{flex:1;overflow:auto;position:relative}
+#tableWrap::-webkit-scrollbar{width:8px;height:8px}
 #tableWrap::-webkit-scrollbar-track{background:transparent}
-#tableWrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px}
-#tableWrap::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.2)}
+#tableWrap::-webkit-scrollbar-thumb{background:rgba(255,255,255,.1);border-radius:4px;border:2px solid var(--bg)}
+#tableWrap::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.18)}
+#tableWrap::-webkit-scrollbar-corner{background:transparent}
 table{min-width:100%;border-collapse:collapse;table-layout:fixed}
-thead th{
-  position:sticky;top:0;background:var(--header);color:var(--muted);
-  font-size:10.5px;font-weight:650;text-align:left;padding:6px 6px;
-  border-bottom:1px solid rgba(255,255,255,.07);cursor:pointer;white-space:nowrap;
-  letter-spacing:.3px;text-transform:uppercase;
-  -webkit-app-region:no-drag;user-select:none;transition:color .12s}
+thead th{position:sticky;top:0;z-index:2;background:var(--bg);color:var(--muted);font-size:10px;font-weight:600;
+  text-align:left;padding:7px 8px 6px;border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;letter-spacing:.5px;text-transform:uppercase;transition:color .12s}
+thead th.num{text-align:right}
 thead th:hover{color:var(--text)}
-thead th.dragover{background:color-mix(in srgb, var(--accent) 30%, var(--header));color:#fff}
-th .arrow{color:var(--accent);font-size:9px;margin-left:2px}
+thead th.sorted{color:var(--text)}
+thead th.dragover{background:color-mix(in srgb, var(--accent) 22%, var(--bg));color:#fff}
+th .arrow{color:var(--accent);font-size:8px;margin-left:3px;vertical-align:1px}
 
+tbody td{padding:0 8px;height:var(--row);font-size:var(--font);border-bottom:1px solid var(--line);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+tbody td.mono{text-align:right}
 tbody tr{transition:background .1s}
-tbody td{padding:0 6px;height:var(--row);font-size:var(--font);
-  border-bottom:1px solid rgba(255,255,255,.04);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-tbody tr:nth-child(even){background:rgba(255,255,255,.015)}
-tbody tr:hover{background:rgba(88,166,255,.08)}
-tbody tr.bl{box-shadow:inset 3px 0 0 #da3633}
-tbody tr.highlight{background:rgba(255,180,64,.12)}
-tbody tr.highlight:hover{background:rgba(255,180,64,.19)}
-tbody tr.highlight.bl{box-shadow:inset 3px 0 0 #da3633, inset 0 0 0 1px rgba(255,180,64,.35)}
-/* Cyan is otherwise unused by any tag severity color, so a nicked row can never be mistaken for
-   a blacklist/highlight signal - this is "identity unknown", not a threat rating. */
-tbody tr.nicked{background:rgba(34,211,238,.10);box-shadow:inset 3px 0 0 #22d3ee}
-tbody tr.nicked:hover{background:rgba(34,211,238,.17)}
-/* Green, so your own team (you + your party) is a quick, consistent scan at a glance - "this is
-   you" still gets its own star badge in the Source column, so this doesn't need a second color. */
-tbody tr.team{background:rgba(63,185,80,.13);box-shadow:inset 3px 0 0 #3fb950}
-tbody tr.team:hover{background:rgba(63,185,80,.2)}
-/* Quit the pre-game lobby ("X has quit!") - kept, but faded so the list reflects who's still here. */
-tbody tr.left td:not(.actionscell){opacity:.4}
-/* Name Watch hit (your own rule list) - purple, a color no threat/party state uses. */
-tbody tr.namewatch{background:rgba(188,140,255,.14);box-shadow:inset 3px 0 0 #bc8cff}
-tbody tr.namewatch:hover{background:rgba(188,140,255,.22)}
-.nwmark{margin-left:4px;color:#bc8cff;font-size:10px;cursor:help}
-tbody tr.left .name{text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
+tbody tr:hover{background:var(--hover)}
+/* Row states: a thin accent bar on the left plus a faint tint - readable at a glance without
+   turning the list into a patchwork. Priority (last wins): team < watch < highlight < blacklist < nick. */
+tbody tr.team{background:rgba(63,185,80,.07);box-shadow:inset 2px 0 0 var(--party)}
+tbody tr.team:hover{background:rgba(63,185,80,.12)}
+tbody tr.namewatch{background:rgba(188,140,255,.08);box-shadow:inset 2px 0 0 var(--watch)}
+tbody tr.namewatch:hover{background:rgba(188,140,255,.13)}
+tbody tr.highlight{background:rgba(227,179,65,.08);box-shadow:inset 2px 0 0 var(--warn)}
+tbody tr.highlight:hover{background:rgba(227,179,65,.13)}
+tbody tr.bl{box-shadow:inset 2px 0 0 var(--bad)}
+tbody tr.bl.highlight{box-shadow:inset 2px 0 0 var(--bad), inset 0 0 0 1px rgba(227,179,65,.25)}
+/* Cyan is unused by any tag severity, so a nicked row never reads as a threat rating. */
+tbody tr.nicked{background:rgba(34,211,238,.07);box-shadow:inset 2px 0 0 var(--nick)}
+tbody tr.nicked:hover{background:rgba(34,211,238,.12)}
+/* Quit the pre-game lobby ("X has quit!") - kept, but faded. */
+tbody tr.left td:not(.actionscell){opacity:.38}
+tbody tr.left .name{text-decoration:line-through;text-decoration-color:rgba(255,255,255,.3)}
 
 .name{font-weight:600}
-/* Always the last cell of every row regardless of which named column is configured last, and
-   sticky so it stays visible at the right edge even if the table has to scroll horizontally
-   (many custom columns, a narrow window, ...). position:sticky still establishes a containing
-   block for the absolutely-centered button below, same reliable pattern as .center/.srcbadge —
-   table-cell vertical-align never centers non-text content consistently (see there for why). */
-.actionscell{position:sticky;right:0;padding:0!important;background:var(--bg)}
-tbody tr:nth-child(even) .actionscell{background:color-mix(in srgb, var(--bg) 98%, #fff)}
-tbody tr:hover .actionscell{background:color-mix(in srgb, var(--bg) 92%, #58a6ff)}
-.rmrow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  width:16px;height:16px;padding:0;border:none;border-radius:4px;
-  background:transparent;color:var(--muted);font-size:10px;line-height:1;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .12s,color .12s,background .12s}
-tbody tr:hover .rmrow{opacity:1}
-.rmrow:hover{background:#da3633;color:#fff}
-/* table-cell vertical-align:middle doesn't reliably center an inline-flex child against its own
-   line box (text vs. svg badges land at slightly different baselines depending on font metrics) -
-   absolute-positioning dead center sidesteps that instead of fighting it. Not display:flex on the
-   <td> itself, since overriding a table-cell's display can mess with the <colgroup> width it's
-   supposed to respect. */
-.center{position:relative;text-align:center}
-.srcbadge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  display:inline-flex;align-items:center;justify-content:center;
-  font-weight:800;font-size:10px;line-height:1}
-.srcbadge svg{display:block}
-.denick{margin-left:4px;color:var(--accent);font-weight:700;font-size:10px;cursor:help}
+.nwmark{margin-left:5px;color:var(--watch);font-size:10px;cursor:help}
+.denick{margin-left:5px;color:var(--accent);font-weight:700;font-size:10px;cursor:help}
 .mono{font-variant-numeric:tabular-nums}
 .dim{color:var(--muted)}
-.nick{color:#22d3ee;font-weight:700}
-.nickchip{background:#22d3ee;font-weight:800;font-size:11px}
-.err{color:#f85149;font-size:10px}
-.loading{color:var(--muted);font-style:italic}
-.tagchip{display:inline-flex;align-items:center;justify-content:center;width:19px;height:15px;
-  padding:0;border-radius:5px;color:#0d1117;vertical-align:middle;
-  box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.tagchip svg{display:block}
-/* Real artwork (see tagChip() in overlay.js) sits on its own with no chip background/shadow —
-   the hand-drawn fallback icons above are the only ones that still need the colored panel. */
-.tagchip.plain{background:transparent;box-shadow:none}
-.snlabel{font-weight:700;font-size:10px;padding:1px 6px;border-radius:5px;background:rgba(255,255,255,.06)}
-.star{font-weight:700}
-.blnum{color:#f85149;font-weight:700}
+.nick{color:var(--nick);font-weight:600}
+.err{color:var(--bad);font-size:10px;font-weight:500;margin-left:4px}
+.loading{color:var(--muted)}
+.star{font-weight:600;font-variant-numeric:tabular-nums}
+.blnum{color:var(--bad);font-weight:700}
+.snlabel{display:inline-block;min-width:26px;text-align:center;font-weight:700;font-size:10.5px;padding:1px 6px;
+  border-radius:5px;background:color-mix(in srgb, currentColor 14%, transparent)}
 
-.empty{position:absolute;top:0;left:0;right:0;bottom:0;display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:6px;color:var(--muted);text-align:center;
-  padding:20px;pointer-events:none}
-.empty-icon{font-size:26px;color:var(--accent);opacity:.5}
+/* Always the last cell; sticky so the remove button stays at the right edge when scrolling. */
+.actionscell{position:sticky;right:0;padding:0!important;background:var(--bg)}
+tbody tr:hover .actionscell{background:color-mix(in srgb, var(--bg) 94%, #fff)}
+.rmrow{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:18px;height:18px;padding:0;border:none;
+  border-radius:5px;background:transparent;color:var(--muted);cursor:pointer;display:flex;align-items:center;
+  justify-content:center;opacity:0;transition:opacity .12s,color .12s,background .12s}
+.rmrow svg{width:10px;height:10px}
+tbody tr:hover .rmrow{opacity:1}
+.rmrow:hover{background:#da3633;color:#fff}
+/* Absolute centring: table-cell vertical-align doesn't reliably centre inline SVG badges. */
+.center{position:relative;text-align:center}
+.srcbadge{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);display:inline-flex;
+  align-items:center;justify-content:center;font-weight:800;font-size:10px;line-height:1}
+.srcbadge svg{display:block}
+.tagchip{display:inline-flex;align-items:center;justify-content:center;width:19px;height:15px;padding:0;
+  border-radius:4px;color:#0d1117;vertical-align:middle}
+.tagchip svg{display:block}
+/* Real artwork carries its own colour - no chip behind it. */
+.tagchip.plain{background:transparent}
+.nickchip{background:var(--nick);font-weight:800;font-size:11px}
+
+/* ---------- empty state ---------- */
+.empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;color:var(--muted);text-align:center;padding:20px;pointer-events:none}
+.empty-icon{opacity:.55;margin-bottom:4px}
+.empty-icon svg{width:30px;height:30px}
 .empty-title{font-size:12.5px;font-weight:600;color:var(--text)}
-.empty-sub{font-size:11px;max-width:220px;line-height:1.5}
+.empty-sub{font-size:11px;max-width:240px;line-height:1.5}
 .hidden{display:none!important}
 
-/* context menu */
-.ctx{position:fixed;background:color-mix(in srgb, var(--header) 92%, #000 8%);
-  border:1px solid rgba(255,255,255,.1);border-radius:8px;
-  padding:5px;z-index:50;min-width:175px;box-shadow:0 6px 16px rgba(0,0,0,.5)}
-.ctx .item{padding:6px 10px;font-size:11.5px;border-radius:6px;cursor:pointer;
-  display:flex;justify-content:space-between;gap:12px;transition:background .1s}
-.ctx .item:hover{background:var(--accent);color:#fff}
-.ctx .sep{height:1px;background:rgba(255,255,255,.08);margin:5px 3px}
-.ctx .head{padding:5px 10px;font-size:10.5px;color:var(--muted);font-weight:700;
-  text-transform:uppercase;letter-spacing:.4px}
+/* ---------- context menu / tooltip / toasts ---------- */
+.ctx{position:fixed;background:var(--header);border:1px solid rgba(255,255,255,.09);border-radius:8px;
+  padding:4px;z-index:50;min-width:190px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.ctx .item{padding:6px 10px;font-size:11.5px;border-radius:5px;cursor:pointer;display:flex;justify-content:space-between;
+  gap:12px;transition:background .1s}
+.ctx .item:hover{background:color-mix(in srgb, var(--accent) 85%, #000);color:#fff}
+.ctx .sep{height:1px;background:var(--line);margin:4px 2px}
+.ctx .head{padding:5px 10px 4px;font-size:10px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 
-/* toasts */
 #toasts{position:fixed;bottom:10px;right:10px;display:flex;flex-direction:column;gap:6px;z-index:60;pointer-events:none}
-.toast{background:color-mix(in srgb, var(--header) 92%, #000 8%);border:1px solid rgba(255,255,255,.08);
-  border-left:3px solid var(--accent);
-  border-radius:8px;padding:8px 13px;font-size:11.5px;max-width:260px;
-  animation:slidein .22s cubic-bezier(.2,.8,.2,1);box-shadow:0 6px 18px rgba(0,0,0,.4)}
-.toast.warn{border-left-color:#d29922}
-.toast.err{border-left-color:#da3633}
-@keyframes slidein{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+.toast{background:var(--header);border:1px solid rgba(255,255,255,.08);border-radius:8px;padding:8px 12px 8px 14px;
+  font-size:11.5px;max-width:280px;position:relative;overflow:hidden;animation:slidein .22s cubic-bezier(.2,.8,.2,1);
+  box-shadow:0 6px 18px rgba(0,0,0,.4);transition:opacity .3s}
+.toast::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent)}
+.toast.warn::before{background:var(--warn)}
+.toast.err::before{background:var(--bad)}
+@keyframes slidein{from{transform:translateX(20px);opacity:0}to{transform:none;opacity:1}}
 
-.tip{position:fixed;background:color-mix(in srgb, #010409 92%, #000);border:1px solid rgba(255,255,255,.1);
-  border-radius:8px;padding:9px 11px;font-size:11px;max-width:320px;z-index:70;color:var(--text);
-  box-shadow:0 6px 16px rgba(0,0,0,.5);white-space:normal;line-height:1.5}
+.tip{position:fixed;background:#0b0f14;border:1px solid rgba(255,255,255,.09);border-radius:8px;padding:9px 11px;
+  font-size:11px;max-width:330px;z-index:70;color:var(--text);box-shadow:0 8px 24px rgba(0,0,0,.5);
+  white-space:normal;line-height:1.55}
 .tip .row{margin:2px 0}

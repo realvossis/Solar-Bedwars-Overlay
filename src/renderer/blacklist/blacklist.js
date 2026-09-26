@@ -76,3 +76,4 @@ function toast(msg, kind) { const d = document.createElement('div'); d.className
 $('#min').onclick = () => api.minimize();
 $('#close').onclick = () => api.close();
 refreshWarn();
+for (const n of document.querySelectorAll('[data-icon]')) n.innerHTML = SolarIcons[n.dataset.icon] || '';

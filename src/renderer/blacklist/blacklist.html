@@ -8,8 +8,8 @@
 </head>
 <body>
   <div id="bar">
-    <span class="drag"><span class="logo">⚑</span> Blacklist Admin</span>
-    <div class="ctrls"><button id="min">—</button><button id="close">✕</button></div>
+    <span class="drag"><span class="logo" data-icon="flag"></span> Blacklist Admin</span>
+    <div class="ctrls"><button id="min" data-icon="minimize" title="Minimize"></button><button id="close" data-icon="close" title="Close"></button></div>
   </div>
   <main id="panel">
     <div id="warn" class="warn hidden">No admin key set. Add it in <b>Settings → API Keys → Admin key</b> to submit tags.</div>
@@ -48,6 +48,7 @@
     </div>
   </main>
   <div id="toasts"></div>
+  <script src="../shared/icons.js"></script>
   <script src="blacklist.js"></script>
 </body>
 </html>

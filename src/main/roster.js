@@ -135,6 +135,7 @@ class Roster extends EventEmitter {
         row.sniper = stats.sniperScore(null, { weights: cfg.sniperWeights, tagSeverity: urchin.severity || 0 });
       }
       row.loading = false;
+      this.emit('loaded', row); // stats + tags are in: main checks it for threat alerts
       this._emit();
     } catch (e) {
       row.loading = false; row.error = String(e.message || e); this._emit();

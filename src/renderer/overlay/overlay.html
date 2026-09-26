@@ -9,26 +9,26 @@
   <div id="app">
     <div id="titlebar">
       <div class="brand-wrap">
-        <span class="logo">☀</span>
+        <span class="logo" data-icon="logo"></span>
         <span class="brand">Solar</span>
-        <span id="count" class="count">0</span>
-        <span id="logdot" class="logdot" title="log watcher"></span>
-        <span id="partyChip" class="chip party hidden"></span>
-        <span id="threatChip" class="chip threat hidden"></span>
-        <span id="rollChip" class="chip roll hidden" title="Nick roller running - click (or Alt+N) to stop"></span>
+        <span id="count" class="count" title="Players tracked">0</span>
+        <span id="logdot" class="logdot" title="Log watcher"></span>
+        <span id="partyChip" class="chip party hidden"><i data-icon="party"></i><b></b></span>
+        <span id="threatChip" class="chip threat hidden"><i data-icon="alert"></i><b></b></span>
+        <span id="rollChip" class="chip roll hidden" title="Nick roller running - click (or Alt+N) to stop"><i data-icon="dice"></i><b></b></span>
       </div>
       <div class="add">
-        <input id="addInput" placeholder="add player…" spellcheck="false" />
+        <input id="addInput" placeholder="Add player…" spellcheck="false" maxlength="16" />
       </div>
       <div class="btns">
-        <button id="btnRefresh" title="Refresh (re-fetch)"><span>⟳</span></button>
-        <button id="btnClear" title="Clear list (Alt+C)"><span>✕</span></button>
-        <button id="btnClick" title="Toggle click-through (Alt+X)"><span>☞</span></button>
-        <button id="btnBlacklist" title="Blacklist admin"><span>⚑</span></button>
-        <button id="btnSettings" title="Settings (Alt+S)"><span>⚙</span></button>
+        <button id="btnRefresh" data-icon="refresh" title="Refresh stats"></button>
+        <button id="btnClear" data-icon="clear" title="Clear list (Alt+C)"></button>
+        <button id="btnClick" data-icon="pointer" title="Click-through (Alt+X)"></button>
+        <button id="btnBlacklist" data-icon="flag" title="Blacklist admin"></button>
+        <button id="btnSettings" data-icon="gear" title="Settings (Alt+S)"></button>
         <div class="btn-sep"></div>
-        <button id="btnMin" class="win-ctrl" title="Minimize"><span>–</span></button>
-        <button id="btnClose" class="win-ctrl close" title="Quit"><span>✕</span></button>
+        <button id="btnMin" class="win-ctrl" data-icon="minimize" title="Minimize"></button>
+        <button id="btnClose" class="win-ctrl close" data-icon="close" title="Quit"></button>
       </div>
     </div>
 
@@ -38,15 +38,16 @@
         <tbody id="body"></tbody>
       </table>
       <div id="empty" class="empty">
-        <div class="empty-icon">☀</div>
-        <div class="empty-title">No players tracked yet</div>
-        <div class="empty-sub">Join a game, or add a name above to start watching.</div>
+        <div class="empty-icon" data-icon="logo"></div>
+        <div class="empty-title">Waiting for a lobby</div>
+        <div class="empty-sub">Players appear here as you join games, party up, or add a name above.</div>
       </div>
     </div>
 
     <div id="ctx" class="ctx hidden"></div>
     <div id="toasts"></div>
   </div>
+  <script src="../shared/icons.js"></script>
   <script src="overlay.js"></script>
 </body>
 </html>

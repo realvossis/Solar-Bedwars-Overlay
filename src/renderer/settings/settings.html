@@ -7,14 +7,15 @@
 </head>
 <body>
   <div id="bar">
-    <span class="drag"><span class="logo">☀</span> Solar Overlay — Settings</span>
-    <div class="ctrls"><button id="min">—</button><button id="close">✕</button></div>
+    <span class="drag"><span class="logo" data-icon="logo"></span> Solar Settings <span class="ver" id="ver"></span></span>
+    <div class="ctrls"><button id="min" data-icon="minimize" title="Minimize"></button><button id="close" data-icon="close" title="Close"></button></div>
   </div>
   <div id="wrap">
     <nav id="tabs"></nav>
     <main id="panel"></main>
   </div>
   <div id="toasts"></div>
+  <script src="../shared/icons.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

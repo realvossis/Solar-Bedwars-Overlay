@@ -14,6 +14,8 @@ const { LogWatcher, validName } = require('./logWatcher');
 const nameRules = require('./nameRules');
 const fs = require('fs');
 const { NickRoller, buildRequirements } = require('./nickRoller');
+const { Notifier } = require('./notifications');
+const statsLib = require('./stats');
 const { WinHelper } = require('./winHelper');
 const { loadFont } = require('./bookReader');
 const { readEntry } = require('./zipReader');
@@ -29,7 +31,7 @@ const gpuAtLaunch = !!config.readEarly('gpuAcceleration', false);
 if (!gpuAtLaunch) app.disableHardwareAcceleration();
 
 let overlayWin = null, settingsWin = null, blacklistWin = null, splashWin = null, tray = null;
-let hypixel, urchin, roster, watcher, nickRoller;
+let hypixel, urchin, roster, watcher, nickRoller, notifier;
 let refreshTimer = null;
 let lastLogStatus = { ok: false, msg: 'not started' };
 // The last known raw server code (e.g. "mini116CN", "dynamiclobby25G", "limbo") - undefined until
@@ -81,18 +83,18 @@ function createOverlay() {
   overlayWin.on('closed', () => { overlayWin = null; });
 }
 
-// A short, one-time-per-launch animated title card. It owns its own ~5.5s timing (see
-// splash.js) and reports back over IPC when it's done rather than main.js guessing a
-// delay, so the hand-off to the real overlay always matches what actually played out.
+// A short, one-time-per-launch title card. It owns its own ~2.6s timing (see splash.js) and
+// reports back over IPC when it's done rather than main.js guessing a delay. Non-focusable and
+// shown inactive: launching the app while in a game must never pull focus out of it.
 function createSplash() {
   splashWin = new BrowserWindow({
-    width: 460, height: 300, frame: false, transparent: true, resizable: false, movable: false,
+    width: 420, height: 260, frame: false, transparent: true, resizable: false, movable: false,
     fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#00000000',
-    hasShadow: false, show: false, center: true,
+    hasShadow: false, show: false, center: true, focusable: false,
     icon: ICON,
     webPreferences: SECURE_PREFS,
   });
-  splashWin.once('ready-to-show', () => splashWin.show());
+  splashWin.once('ready-to-show', () => splashWin.showInactive());
   splashWin.loadFile(path.join(__dirname, '..', 'renderer', 'splash', 'splash.html'));
   splashWin.on('closed', () => { splashWin = null; });
   // Safety net: if the splash page ever fails to report in, don't leave the overlay hidden forever.
@@ -221,6 +223,7 @@ function wireWatcher() {
     // fallback patterns can't tell) - leave currentServer alone rather than guessing. Any real
     // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
     if (info && info.server !== undefined) currentServer = info.server;
+    threatsAlerted.clear(); // new lobby: a sniper you meet again deserves a fresh heads-up
     if (getConfig().clearOnServerChange) roster.clear();
     if (pendingHouseOwner && Date.now() - pendingHouseOwnerTs < 8000) roster.addNames([pendingHouseOwner], 'house');
     pendingHouseOwner = null;
@@ -246,16 +249,19 @@ function wireWatcher() {
   // not just a generic "flagged" marker.
   watcher.on('partyInvite', (n) => {
     if (getConfig().triggers.onPartyInvite) watchlistAdd(n, 'party invite', 'partyInvite');
-    toast(`Party invite from ${n}`, 'info');
+    notifyUser('partyInvite', { title: 'Party invite', player: n }, `Party invite from ${n}`);
   });
-  watcher.on('friendRequest', (n) => { if (getConfig().triggers.onFriendRequest) watchlistAdd(n, 'friend request', 'friendRequest'); });
+  watcher.on('friendRequest', (n) => {
+    if (getConfig().triggers.onFriendRequest) watchlistAdd(n, 'friend request', 'friendRequest');
+    notifyUser('friendRequest', { title: 'Friend request', player: n }, `Friend request from ${n}`);
+  });
   watcher.on('dmFrom', (n, text) => {
     if (getConfig().triggers.onDirectMessage) watchlistAdd(n, 'DM: ' + (text || '').slice(0, 40), 'dm');
-    toast(`DM from ${n}`, 'info');
+    notifyUser('dm', { title: 'Direct message', player: n, text }, `DM from ${n}`);
   });
   watcher.on('mention', ({ by, text }) => {
     if (getConfig().triggers.onNameInChat) watchlistAdd(by, 'said your name: ' + (text || '').slice(0, 40), 'mention');
-    toast(`${by} mentioned you`, 'warn');
+    notifyUser('mention', { title: 'Mentioned you', player: by, text }, `${by} mentioned you`, 'warn');
   });
   // De-nick attempt: match the killer's reported lifetime final-kill count against players this
   // app has already seen stats for (see hypixel.findByFinalKills — there's no way to search
@@ -273,6 +279,58 @@ function wireWatcher() {
   // current status instead of being stuck showing whatever the logdot's default markup was until
   // the next actual change (which might be a long time, or never).
   watcher.on('status', (s) => { lastLogStatus = s; broadcast('log:status', s); });
+}
+
+// ---------------- notifications ----------------
+// Corner popup + sound if the user has that event on; otherwise the overlay's own small toast, as
+// before. Player stats are filled into the card as soon as they're known.
+async function notifyUser(kind, { title, player, text }, fallback, fallbackKind = 'info') {
+  let id = null;
+  try { id = await notifier.notify({ kind, title, text, player, stats: player && kind !== 'nickMatch' ? summaryFromRoster(player) : null }); } catch (_) {}
+  if (!id) { toast(fallback, fallbackKind); return; }
+  if (player && kind !== 'nickMatch' && !summaryFromRoster(player)) {
+    playerSummary(player).then((s) => notifier.update(id, s)).catch(() => notifier.update(id, { name: player, nicked: true }));
+  }
+}
+
+function toSummary(name, s, sn, ur) {
+  const tags = ((ur && ur.tags) || []).slice().sort((a, b) => (b.severity || 0) - (a.severity || 0))
+    .map((t) => ({ label: t.label || String(t.type || '').slice(0, 6).toUpperCase(), color: t.color }));
+  if (!s) return { name, tags, sniper: sn && sn.score ? sn : null };
+  return { name, rank: s.rank, star: s.star, starColor: s.starColorHex, fkdr: s.fkdr, wlr: s.wlr, finals: s.finalKills, ws: s.winstreak, sniper: sn, tags };
+}
+function summaryFromRoster(name) {
+  const row = roster && roster.players.get(String(name).toLowerCase());
+  if (!row || row.loading) return null;
+  if (row.nicked) return { name: row.name, nicked: true };
+  return toSummary(row.name, row.stats, row.sniper, row.urchin);
+}
+// Not on the list (e.g. a DM from someone in another lobby): look them up directly. Same caches
+// and rate limiter as the roster, so known players cost no extra requests.
+async function playerSummary(name) {
+  const r = await hypixel.resolveUuid(name);
+  if (!r) return { name, nicked: true };
+  const cfg = getConfig();
+  const [player, ur] = await Promise.all([hypixel.fetchPlayer(r.id).catch(() => null), urchin.lookup(r.id, r.name).catch(() => null)]);
+  const s = player ? statsLib.extract(player, hypixel.monthlyBaseline(r.id)) : null;
+  const sn = statsLib.sniperScore(s, { weights: cfg.sniperWeights, tagSeverity: (ur && ur.severity) || 0 });
+  return toSummary(player ? (player.displayname || r.name) : r.name, s, sn, ur);
+}
+
+// A blacklisted or high-sniper-score player just finished loading into your lobby. Once per player
+// per lobby; never for you or your party.
+const threatsAlerted = new Set();
+function checkThreat(row) {
+  if (row.source === 'SELF' || row.source === 'PARTY' || row.left || threatsAlerted.has(row.key)) return;
+  const min = Number((getConfig().notifications || {}).threatMinSniper) || 70;
+  const u = row.urchin || {};
+  const flagged = (u.severity || 0) >= 0.6;
+  const score = (row.sniper && row.sniper.score) || 0;
+  if (!flagged && score < min) return;
+  threatsAlerted.add(row.key);
+  const top = u.primary;
+  const text = flagged && top ? `${top.label || 'Blacklisted'}${top.reason ? ': ' + top.reason : ''}` : `Sniper score ${score} (${row.sniper.label})`;
+  notifyUser('threat', { title: 'Threat in your lobby', player: row.name, text }, `Threat: ${row.name}`, 'warn');
 }
 
 // ---------------- nick roller ----------------
@@ -314,11 +372,12 @@ function setupNickRoller() {
     // While rolling, the overlay must neither show up in the captures nor catch the clicks.
     if (overlayWin && s.running) { overlayWin.setContentProtection(true); overlayWin.setIgnoreMouseEvents(true, { forward: true }); }
   });
-  nickRoller.on('done', ({ message, kind }) => {
+  nickRoller.on('done', ({ name, message, kind }) => {
     applyCapture(); applyClickThrough(); // back to the user's own settings
     helper.stop();
     fs.rm(capPath, { force: true }, () => {});
-    toast(message, kind === 'match' ? 'warn' : kind === 'err' ? 'err' : 'info');
+    if (kind === 'match') notifyUser('nickMatch', { title: 'Nick found', player: name, text: 'Click USE NAME to take it.' }, message, 'warn');
+    else toast(message, kind === 'err' ? 'err' : 'info');
   });
 }
 function toggleNickRoller() {
@@ -339,7 +398,7 @@ function applyRefreshTimer() {
 // Only our own windows, showing our own bundled pages, may call into the main process.
 function isTrustedSender(e) {
   const win = BrowserWindow.fromWebContents(e.sender);
-  if (!win || ![overlayWin, settingsWin, blacklistWin, splashWin].includes(win)) return false;
+  if (!win || ![overlayWin, settingsWin, blacklistWin, splashWin, notifier && notifier.window].includes(win)) return false;
   try { return new URL(e.senderFrame.url).protocol === 'file:'; } catch (_) { return false; }
 }
 function handle(channel, fn) {
@@ -462,6 +521,9 @@ function registerIpc() {
     return { valid: compiled.rules.length, errors: compiled.errors, hits: nameRules.match(compiled, cleanText(name, 32)) };
   });
 
+  handle('notify:preview', () => { notifier.preview(); return true; });
+  handle('notify:idle', () => { notifier.idle(); return true; });
+
   handle('nickRoller:status', () => nickRoller.state);
   handle('nickRoller:stop', () => { nickRoller.stop('stopped from the app'); return true; });
   // Settings' preview: are the requirements usable, would this name pass, and can we find the font?
@@ -572,8 +634,13 @@ if (!app.requestSingleInstanceLock()) {
     watcher = new LogWatcher();
 
     roster.on('update', (list) => broadcast('roster:update', list));
-    roster.on('nameMatch', (row) => { if ((getConfig().nameWatch || {}).notify !== false) toast(`Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn'); });
+    roster.on('nameMatch', (row) => {
+      if ((getConfig().nameWatch || {}).notify === false) return;
+      notifyUser('nameWatch', { title: 'Name Watch', player: row.name, text: 'Matches ' + row.nameMatch.join(', ') }, `Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn');
+    });
+    roster.on('loaded', checkThreat);
     wireWatcher();
+    notifier = new Notifier({ getConfig, webPreferences: SECURE_PREFS, anchorWindow: () => overlayWin });
     setupNickRoller();
     registerIpc();
     createSplash();
@@ -589,5 +656,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); });
 }

@@ -151,6 +151,7 @@ const TABS = {
   General: panelGeneral,
   'Log & Detection': panelLog,
   Triggers: panelTriggers,
+  Notifications: panelNotifications,
   'Name Watch': panelNameWatch,
   'Nick Roller': panelNickRoller,
   'API Keys': panelApi,
@@ -202,6 +203,46 @@ function panelTriggers(p) {
   const clear = el('button', 'ghost'); clear.textContent = 'Clear local watchlist';
   clear.onclick = async () => { await set('watchlist', {}); toast('Watchlist cleared', 'ok'); };
   p.appendChild(fieldRow('Reset watchlist', 'Remove all locally auto-flagged players.', clear));
+}
+
+const NOTIFY_EVENTS = [
+  ['nickMatch', 'Nick roller found a matching name'],
+  ['mention', 'Someone says your name in chat'],
+  ['dm', 'Direct message'],
+  ['partyInvite', 'Party invite'],
+  ['friendRequest', 'Friend request'],
+  ['threat', 'Threat joins your lobby'],
+  ['nameWatch', 'Name Watch match'],
+];
+function panelNotifications(p) {
+  p.appendChild(header('Notifications', 'Popups in a corner of your screen with a quick look at the player\'s stats, plus short sounds - for the moments worth knowing about mid-game.'));
+  const note = el('div', 'note');
+  const ni = el('span', 'ic'); ni.innerHTML = SolarIcons.info;
+  const nt = el('div'); nt.textContent = 'Popups can never take focus from your game: they can\'t be clicked or activated and disappear on their own, so you won\'t get tabbed out mid-fight.';
+  note.appendChild(ni); note.appendChild(nt);
+  p.appendChild(note);
+
+  p.appendChild(header('Popups & sound', ''));
+  p.appendChild(fieldRow('Enable notifications', '', toggle('notifications.enabled')));
+  p.appendChild(fieldRow('Position', 'Corner of the screen the overlay is on.', select('notifications.position', [
+    { v: 'bottom-right', l: 'Bottom right' }, { v: 'bottom-left', l: 'Bottom left' }, { v: 'top-right', l: 'Top right' }, { v: 'top-left', l: 'Top left' },
+  ])));
+  p.appendChild(fieldRow('Show for (seconds)', '', number('notifications.durationSec', 2, 30, 1)));
+  p.appendChild(fieldRow('Sounds', '', toggle('notifications.sound')));
+  p.appendChild(fieldRow('Volume', '', range('notifications.volume', 0, 1, 0.05, 1)));
+  p.appendChild(fieldRow('Threat alert: sniper score from', 'Also alerts for anyone blacklisted, regardless of score.', number('notifications.threatMinSniper', 20, 100, 5)));
+  const test = el('button', 'ghost'); test.textContent = 'Send test notifications';
+  test.onclick = () => api.previewNotification();
+  p.appendChild(fieldRow('Preview', 'Shows three sample popups with sound.', test));
+
+  p.appendChild(header('Events', 'Choose, per event, whether it shows a popup and/or plays a sound. With the popup off, you still get the small toast inside the overlay.'));
+  const grid = el('div', 'evgrid');
+  for (const h of ['Event', 'Popup', 'Sound']) grid.appendChild(el('div', 'h')).textContent = h;
+  for (const [key, label] of NOTIFY_EVENTS) {
+    grid.appendChild(el('div', 'n')).textContent = label;
+    for (const kind of ['popup', 'sound']) { const c = el('div', 't'); c.appendChild(toggle(`notifications.events.${key}.${kind}`)); grid.appendChild(c); }
+  }
+  p.appendChild(grid);
 }
 
 function panelNameWatch(p) {
@@ -714,19 +755,51 @@ function panelAbout(p) {
   p.appendChild(reset);
 }
 
-function header(t, sub) { const d = el('div'); d.innerHTML = `<h2>${esc(t)}</h2>` + (sub ? `<div class="sub">${esc(sub)}</div>` : ''); return d; }
+function header(t, sub) { const d = el('div', 'sec-head'); d.innerHTML = `<h2>${esc(t)}</h2>` + (sub ? `<div class="sub">${esc(sub)}</div>` : ''); return d; }
+
+// Turns a tab's flat list of headers + rows into a page title followed by one card per section:
+// the first header is the page title, every later header opens a new card holding everything up
+// to the next one. Keeps each panel function simple (they just append in order).
+function groupSections(p) {
+  let seenTitle = false, section = null;
+  for (const k of [...p.children]) {
+    if (k.classList.contains('sec-head')) {
+      if (!seenTitle) { k.classList.add('page-head'); seenTitle = true; section = null; continue; }
+      section = el('div', 'section'); p.insertBefore(section, k); section.appendChild(k); continue;
+    }
+    if (!seenTitle) continue;
+    if (!section && k.classList.contains('note')) continue; // banners stand on their own
+    if (!section) { section = el('div', 'section'); p.insertBefore(section, k); }
+    section.appendChild(k);
+  }
+}
 
 // ---------- shell ----------
+const TAB_ICONS = {
+  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice',
+  'API Keys': 'key', Connections: 'link', Appearance: 'palette', Columns: 'columns', 'Sniper Score': 'target', Performance: 'gauge', About: 'info',
+};
 let active = 'General';
 function buildTabs() {
   const nav = $('#tabs'); nav.innerHTML = '';
   for (const name of Object.keys(TABS)) {
-    const t = el('div', 'tab' + (name === active ? ' active' : '')); t.textContent = name;
+    const t = el('div', 'tab' + (name === active ? ' active' : ''));
+    const ic = el('span', 'ic'); ic.innerHTML = SolarIcons[TAB_ICONS[name]] || '';
+    const label = el('span'); label.textContent = name;
+    t.appendChild(ic); t.appendChild(label);
     t.onclick = () => { active = name; rerender(); };
     nav.appendChild(t);
   }
 }
-function rerender() { buildTabs(); const p = $('#panel'); p.innerHTML = ''; TABS[active](p); }
+function rerender() {
+  buildTabs();
+  const p = $('#panel'); p.innerHTML = '';
+  TABS[active](p);
+  groupSections(p);
+  p.scrollTop = 0;
+}
+for (const n of document.querySelectorAll('[data-icon]')) n.innerHTML = SolarIcons[n.dataset.icon] || '';
+api.appInfo().then((i) => { $('#ver').textContent = 'v' + i.version; }).catch(() => {});
 
 function toast(msg, kind) { const d = el('div', 'toast ' + (kind || '')); d.textContent = msg; $('#toasts').appendChild(d); setTimeout(() => d.remove(), 2500); }
 

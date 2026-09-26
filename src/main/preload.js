@@ -42,6 +42,12 @@ contextBridge.exposeInMainWorld('solarBridge', {
   checkNickRoller: (name) => invoke('nickRoller:check', name),
   onNickRoller: (cb) => on('nickRoller:status', cb),
 
+  // notifications (the popup window listens; Settings can preview)
+  previewNotification: () => invoke('notify:preview'),
+  onNotify: (cb) => on('notify:show', cb),
+  onNotifyUpdate: (cb) => on('notify:update', cb),
+  notifyIdle: () => invoke('notify:idle'),
+
   // utils
   testKey: () => invoke('key:test'),
   pickLog: () => invoke('log:pick'),

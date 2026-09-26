@@ -121,6 +121,18 @@ messages, so nobody can fake a party join by typing it in public chat.
 Players who leave the pre-game lobby ("X has quit!") stay listed but faded. The title bar shows
 your party size and a ⚠ count of threats in the lobby (blacklisted, or sniper score ≥ 70).
 
+### Notifications (Settings → Notifications)
+Corner popups with a quick look at the player (star, FKDR, WLR, finals, winstreak, sniper score,
+blacklist tags) plus short synthesized sounds. You choose per event whether it shows a popup and/or
+plays a sound: nick roller match, someone saying your name, DMs, party invites, friend requests,
+a **threat joining your lobby** (blacklisted, or sniper score over your threshold; once per player
+per lobby), and Name Watch hits. You can pick the corner, duration and volume, and there's a
+preview button.
+
+**Popups never take focus from your game.** They live in a window that can't be activated or
+clicked, is only ever shown inactive, and dismisses itself. The app's launch splash doesn't take
+focus either, so starting Solar mid-game won't tab you out.
+
 ### Name Watch (Settings → Name Watch)
 Your own list of names or patterns, one per line, checked against every player on the overlay.
 Plain text matches anywhere in a name, ignoring case (`Cat` matches *xXCatLover*). A regex goes

@@ -17,7 +17,17 @@
   (randomized curved glides with variable speed, occasional overshoot, pre-click pause) and a
   random click point on the link. All configurable, and every roll is re-randomized.
 
+- **Notifications**: corner popups with a player stat summary and synthesized sounds for nick roller
+  matches, mentions, DMs, party invites, friend requests, threats joining your lobby and Name Watch
+  hits. Per-event popup/sound switches, corner, duration, volume and threat threshold are all
+  configurable. The popup window is non-focusable, click-through and only ever shown inactive, so
+  it can never pull focus from the game (verified by sampling the foreground window).
+
 ### Changed
+- UI refresh: one consistent SVG icon set across all windows, a calmer overlay (compact
+  locale-independent numbers, right-aligned stats, subtler row states, icon-only Source/Tag
+  columns), and card-based Settings with sidebar icons.
+- New minimal launch splash (about 2.6s instead of 5.5s). It no longer takes focus when it appears.
 - Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.
 - IPC text inputs now accept strings only.
 

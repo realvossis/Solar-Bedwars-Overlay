@@ -4,8 +4,8 @@ const api = window.solarBridge;
 // width here is actually applied now (via the <colgroup> renderHead() builds) instead of every
 // column just splitting the window evenly, which is what was squeezing Player down to a sliver.
 const COLMETA = {
-  source:  { label: 'Source',     num: false, width: 44 },
-  tag:     { label: 'Tag',        num: false, width: 46 },
+  source:  { label: 'Source',     num: false, width: 34 },
+  tag:     { label: 'Tag',        num: false, width: 36 },
   star:    { label: 'Lvl',        num: true,  width: 58 },
   name:    { label: 'Player',     num: false, width: 130 },
   fkdr:    { label: 'FKDR',       num: true,  width: 62 },
@@ -13,7 +13,7 @@ const COLMETA = {
   finals:  { label: 'F.Kills',    num: true,  width: 70 },
   wins:    { label: 'Wins',       num: true,  width: 62 },
   ws:      { label: 'WS',         num: true,  width: 46 },
-  hws:     { label: 'Peak WS',    num: true,  width: 60 },
+  hws:     { label: 'Peak WS',    num: true,  width: 72 },
   mfkdr:   { label: 'M.FKDR',     num: true,  width: 64 },
   sniper:  { label: 'Sniper',     num: true,  width: 66 },
   lastseen:{ label: 'Last Login', num: true,  width: 92 },
@@ -175,7 +175,13 @@ function renderHead(){
     const th = el('th');
     th.dataset.key = col.key;
     th.draggable = true;
-    th.innerHTML = esc(meta.label) + (cfg.sortBy===col.key ? `<span class="arrow">${cfg.sortDir==='desc'?'▼':'▲'}</span>` : '');
+    // Icon-only columns (Source/Tag) get no header text - their badges speak for themselves -
+    // but keep the name as a tooltip. Numeric columns right-align to match their values.
+    const iconCol = col.key==='source' || col.key==='tag';
+    th.title = meta.label;
+    if(meta.num) th.classList.add('num');
+    if(cfg.sortBy===col.key) th.classList.add('sorted');
+    th.innerHTML = (iconCol ? '' : esc(meta.label)) + (cfg.sortBy===col.key ? `<span class="arrow">${cfg.sortDir==='desc'?'▼':'▲'}</span>` : '');
     th.onclick = ()=>{ const d = cfg.sortBy===col.key ? (cfg.sortDir==='desc'?'asc':'desc') : (meta.num?'desc':'asc');
       save({ sortBy: col.key, sortDir: d }); };
     th.oncontextmenu = (e)=>{ e.preventDefault(); columnMenu(e.clientX, e.clientY); };
@@ -292,7 +298,7 @@ function cell(row, key){
     }
     case 'star':{
       if(!s){ td.textContent=''; return td; }
-      td.innerHTML = `<span class="star" style="color:${s.starColorHex}">${s.star}✫</span>`; return td;
+      td.className='mono'; td.innerHTML = `<span class="star" style="color:${s.starColorHex}">${s.star}✫</span>`; return td;
     }
     case 'source':{
       td.className='center'; td.innerHTML = sourceBadge(row.source); return td;
@@ -330,14 +336,16 @@ function cell(row, key){
   }
   return td;
 }
-function fmt(n){ n=+n||0; return n>=100000?(n/1000).toFixed(0)+'k':n.toLocaleString(); }
+// Always the same grouping regardless of Windows locale (was showing "25.739" on German systems),
+// and compact past 10k so wide numbers don't crowd the row.
+function fmt(n){ n=+n||0; if(n>=1e6) return (n/1e6).toFixed(n>=1e7?0:1)+'M'; if(n>=1e4) return (n/1e3).toFixed(n>=1e5?0:1)+'k'; return n.toLocaleString('en-US'); }
 
 // One-click remove, always the last cell of the row (sticky to the right edge, so it stays put
 // even if the table scrolls horizontally) and revealed on row hover. Right-click still has the
 // full menu, but fixing one mistyped name shouldn't need it just to clear a single row.
 function actionsCell(row){
   const td = el('td','actionscell');
-  const rm = el('button','rmrow'); rm.type='button'; rm.textContent='✕'; rm.title='Remove from list';
+  const rm = el('button','rmrow'); rm.type='button'; rm.innerHTML=SolarIcons.close; rm.title='Remove from list';
   rm.onclick = (e)=>{ e.stopPropagation(); api.removePlayer(row.uuid||row.name); };
   td.appendChild(rm);
   return td;
@@ -385,10 +393,10 @@ function renderSummary(){
   const party = rows.filter((r)=>r.source==='PARTY');
   const tc = $('#threatChip'), pc = $('#partyChip');
   tc.classList.toggle('hidden', !threats.length);
-  tc.textContent = '⚠ ' + threats.length;
+  tc.querySelector('b').textContent = threats.length;
   tc.title = threats.length ? 'Threats in lobby: ' + threats.map((r)=>r.name).join(', ') : '';
   pc.classList.toggle('hidden', !party.length);
-  pc.textContent = '👥 ' + (party.length + (rows.some((r)=>r.source==='SELF') ? 1 : 0));
+  pc.querySelector('b').textContent = party.length + (rows.some((r)=>r.source==='SELF') ? 1 : 0);
   pc.title = party.length ? 'Party: ' + party.map((r)=>r.name).join(', ') : '';
 }
 
@@ -494,6 +502,7 @@ function applyAll(){ applyTheme(); renderHead(); render(); }
 
 // ---------------- wire ----------------
 async function init(){
+  for(const n of document.querySelectorAll('[data-icon]')) n.innerHTML = SolarIcons[n.dataset.icon] || '';
   cfg = await api.getConfig();
   rows = await api.getRoster();
   applyAll();
@@ -520,7 +529,7 @@ async function init(){
   roll.onclick=()=>api.stopNickRoller();
   api.onNickRoller((s)=>{
     roll.classList.toggle('hidden', !s.running);
-    roll.textContent = '\u{1F3B2} ' + s.rolls + (s.last ? ' · ' + s.last : '');
+    roll.querySelector('b').textContent = s.rolls + (s.last ? ' · ' + s.last : '');
   });
 
   const inp=$('#addInput');
