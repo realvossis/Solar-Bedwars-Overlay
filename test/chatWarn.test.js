@@ -54,6 +54,25 @@ t('custom template cannot smuggle a command prefix into party messages', () => {
   assert.ok(compose('/kill {name}', tagged('X', ''), { party: true }).startsWith('/pc /kill'), 'party prefix always first');
 });
 
+// ---- after-start summary ----
+const { composeSummary } = require('../src/main/chatWarn');
+const flagged = (name, type) => ({ name, urchin: { tags: [{ type, reason: 'r', severity: 1 }] } });
+t('summary lists flagged players in one /pc message', () => {
+  assert.strictEqual(composeSummary([flagged('Sheplock', 'Blatant Cheater'), { name: 'Recoverin', urchin: { tags: [] }, sniper: { score: 88 } }]),
+    '/pc [Solar] Flagged: Sheplock (Blatant Cheater); Recoverin (sniper score 88)');
+});
+t('summary never exceeds the chat limit and counts the rest', () => {
+  const many = Array.from({ length: 12 }, (_, i) => flagged('Player_' + i + 'xxxxx', 'Closet Cheater'));
+  const m = composeSummary(many);
+  assert.ok(m.length <= CHAT_LIMIT, m.length); assert.match(m, / \+\d+ more$/);
+  const shown = (m.match(/\(/g) || []).length, more = +m.match(/\+(\d+) more$/)[1];
+  assert.strictEqual(shown + more, 12);
+});
+t('summary caps a very long tag', () => {
+  const m = composeSummary([flagged('A', 'X'.repeat(80)), flagged('B', 'Sniper')]);
+  assert.ok(m.includes('B (Sniper)') && m.length <= CHAT_LIMIT, m);
+});
+
 // ---- auto-dodge ----
 const { dodgeReason, safeCommand } = require('../src/main/chatWarn');
 const player = (o) => ({ name: 'P', source: 'GAME', urchin: { tags: [], severity: 0 }, stats: { fkdr: 2 }, sniper: { score: 20 }, ...o });

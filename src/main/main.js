@@ -249,7 +249,11 @@ function wireWatcher() {
   // "ONLINE: a, b, c" is the full-lobby list a client dumps on load (via /who or auto-who) —
   // clearOnLobbyJoin wipes stale entries right before repopulating from that fresh list, a
   // safety net for when serverChange's own detection doesn't fire first.
-  watcher.on('who', (names) => { if (getConfig().clearOnLobbyJoin) roster.clear(); roster.addNames(names, 'GAME'); });
+  watcher.on('who', (names) => {
+    if (getConfig().clearOnLobbyJoin) roster.clear();
+    roster.addNames(names, 'GAME');
+    maybeSummaryAfterStart(names);
+  });
   // Both of these are passive background noise-pickers, not a deliberate action like /who - so
   // both require inBedwarsMatch() (your actual small match instance), not just "somewhere
   // Bedwars-flagged" - the shared matchmaking staging lobby is also gametype BEDWARS but is just
@@ -300,6 +304,7 @@ function wireWatcher() {
     if (info && info.server !== undefined) currentServer = info.server;
     threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
     partyWarned.clear(); partyWarnQueue.length = 0; publicWarnIndex = 0; pendingDodge = null; dodgedThisLobby = false;
+    pendingSummary = null; summaryDoneThisMatch = false;
     if (getConfig().clearOnServerChange) roster.clear();
     if (pendingHouseOwner && Date.now() - pendingHouseOwnerTs < 8000) roster.addNames([pendingHouseOwner], 'house');
     pendingHouseOwner = null;
@@ -501,6 +506,7 @@ function maybeWarnParty(row) {
 setInterval(async () => {
   if (chatBusy) return;
   if (pendingDodge) { await runDodge(); return; }
+  if (pendingSummary) { await runSummary(); return; }
   if (!partyWarnQueue.length) return;
   if (inMatch || currentGametype !== 'BEDWARS' || !currentMode) { partyWarnQueue.length = 0; return; }
   if (Date.now() - lastPartyWarn < 3500) return;
@@ -510,6 +516,38 @@ setInterval(async () => {
   if (r === 'ok') { partyWarnQueue.shift(); lastPartyWarn = Date.now(); }
   else if (!/^(notmc|notfg|keysheld|busy)$/.test(r)) { partyWarnQueue.shift(); console.warn('party warn failed:', r); }
 }, 1000);
+
+// ---- party summary after the game starts ----
+// The first /who after a Bedwars match starts reveals the real names (pre-game joins are scrambled).
+// Once those players' stats/tags have loaded, ONE combined party message lists every flagged player
+// you weren't already warned about in the pre-game lobby. It's typed only when you're not holding
+// any key (same rules as every chat action) and dropped after 20s rather than interrupting a fight.
+let pendingSummary = null, summaryDoneThisMatch = false;
+const hasParty = () => [...roster.players.values()].some((r) => r.source === 'PARTY');
+function maybeSummaryAfterStart(names) {
+  const c = cwCfg();
+  if (!c.partyAuto || c.afterStart === false || summaryDoneThisMatch) return;
+  if (currentGametype !== 'BEDWARS' || !inMatch) return;
+  summaryDoneThisMatch = true; // only the first /who of the match
+  const keys = names.map((n) => String(n).toLowerCase());
+  const deadline = Date.now() + 15000;
+  const poll = setInterval(() => {
+    const rows = keys.map((k) => roster.players.get(k)).filter(Boolean);
+    if (rows.some((r) => r.loading) && Date.now() < deadline) return; // wait for stats/tags
+    clearInterval(poll);
+    if (!inMatch || !hasParty()) return;
+    const threats = rows.filter((r) => isThreat(r) && !partyWarned.has(r.key));
+    if (!threats.length) return;
+    threats.forEach((r) => partyWarned.add(r.key));
+    pendingSummary = { text: chatWarn.composeSummary(threats), expires: Date.now() + 20000 };
+  }, 500);
+}
+async function runSummary() {
+  const sm = pendingSummary;
+  if (!inMatch || Date.now() > sm.expires) { pendingSummary = null; return; } // stale: drop, never interrupt later
+  const r = await typeIntoChat(sm.text, true);
+  if (r === 'ok' || !/^(notmc|notfg|keysheld|busy)$/.test(r)) pendingSummary = null;
+}
 
 // ---- auto-dodge ----
 // Leaves the Bedwars pre-game lobby (with your configured command, '/l bedwars' by default) the first

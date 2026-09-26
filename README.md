@@ -183,6 +183,7 @@ and screenshots while still visible to you. On by default.
 ### Chat warnings & auto-dodge (Settings → Chat & Dodge)
 Solar can type into Minecraft's chat for you (Windows):
 - **Warn your party** (off by default): one `/pc` message per flagged player in the Bedwars pre-game lobby.
+  After the game starts, your first `/who` triggers one combined `/pc` message for the flagged players it reveals.
 - **Alt+W**: types a public warning for the next flagged player - never sent automatically; you press Enter.
 - **Auto-dodge** (off by default): leaves the pre-game lobby (`/l bedwars` or your own command) when
   someone is blacklisted, over your FKDR/sniper limit, or nicked.

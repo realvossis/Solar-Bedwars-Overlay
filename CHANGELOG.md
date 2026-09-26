@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.8 — 2026-09-26
+
+### Added
+- **Party warning after the game starts.** Pre-game names are scrambled, so after a Bedwars match
+  starts Solar waits for your first `/who`, then sends ONE combined party message listing the flagged
+  players you weren't already warned about, e.g. `/pc [Solar] Flagged: Sheplock (Blatant Cheater);
+  Recoverin (sniper score 88) +1 more` (fitted to the 100-character limit). Once per match; typed only
+  when you're not holding any key, and dropped after 20s rather than interrupting a fight. Setting:
+  Chat & Dodge -> Also warn after the game starts (on when party warnings are on).
+
+(1.2.7 was replaced by this release; it contains everything from 1.2.7.)
+
 ## 1.2.7 — 2026-09-26
 
 ### Changed

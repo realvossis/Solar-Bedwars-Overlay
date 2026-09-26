@@ -219,6 +219,7 @@ function defaults() {
     // typed into chat, never sent - you press Enter. Placeholders: {name} {tag} {reason} {sniper}.
     chatWarn: {
       partyAuto: false, maxPartyPerLobby: 4, hotkey: true,
+      afterStart: true, // also one combined party message after the first /who once the game started
       partyTemplate: '[Solar] {name}: {tag} - {reason}',
       publicTemplate: 'Heads up: {name} is listed as {tag} - {reason}',
     },

@@ -69,6 +69,25 @@ function compose(template, row, { party = false } = {}) {
   return (party ? PARTY_PREFIX : '') + msg;
 }
 
+// One party message for several players (sent once after the game starts, on the first /who):
+// "/pc [Solar] Flagged: A (Blatant Cheater); B (sniper score 88) +1 more". Adds players while they
+// fit the chat limit; the rest become "+N more". Tags are capped so one long tag can't crowd out
+// everyone else.
+function composeSummary(rows, { prefix = '[Solar] Flagged:' } = {}) {
+  const head = PARTY_PREFIX + (clean(prefix) || '[Solar] Flagged:');
+  const items = (rows || []).map((r) => `${clean(r.name).slice(0, 16)} (${cut(describe(r).tag, 24)})`);
+  let out = head, used = 0;
+  for (let i = 0; i < items.length; i++) {
+    const sep = used ? '; ' : ' ';
+    const rest = items.length - i - 1;
+    const tail = rest ? ` +${rest} more` : '';
+    if ((out + sep + items[i] + tail).length > CHAT_LIMIT) break;
+    out += sep + items[i]; used++;
+  }
+  if (used < items.length) out += ` +${items.length - used} more`;
+  return out.length <= CHAT_LIMIT ? out : out.slice(0, CHAT_LIMIT);
+}
+
 // ---- auto-dodge ----
 // Should this player make you leave the pre-game lobby? Returns a short human reason, or null.
 // c = { onTagged, fkdrAbove, sniperAbove, onNicked } (0 = that check is off).
@@ -90,4 +109,4 @@ function safeCommand(cmd) {
   return /^\/[A-Za-z0-9_ .-]{1,60}$/.test(c) ? c : DEFAULT_DODGE_COMMAND;
 }
 
-module.exports = { compose, describe, clean, prettyType, dodgeReason, safeCommand, CHAT_LIMIT, DEFAULTS, DEFAULT_DODGE_COMMAND };
+module.exports = { compose, composeSummary, describe, clean, prettyType, dodgeReason, safeCommand, CHAT_LIMIT, DEFAULTS, DEFAULT_DODGE_COMMAND };

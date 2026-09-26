@@ -261,6 +261,7 @@ function panelChatDodge(p) {
   p.appendChild(header('Warn your party', 'One party-chat message per flagged player, only in the Bedwars pre-game lobby and only when you\'re in a party. Sent automatically.'));
   p.appendChild(fieldRow('Auto-warn party', 'Off by default.', toggle('chatWarn.partyAuto')));
   p.appendChild(fieldRow('Max messages per lobby', 'Keeps it well clear of Hypixel\'s spam filter.', number('chatWarn.maxPartyPerLobby', 1, 8, 1)));
+  p.appendChild(fieldRow('Also warn after the game starts', 'Pre-game names are scrambled, so after the start Solar waits for your first /who, then sends ONE combined party message listing the flagged players, e.g. "Flagged: A (Blatant Cheater); B (sniper score 88)". Only when you\'re not holding any key; dropped after 20s instead of interrupting a fight.', toggle('chatWarn.afterStart')));
   const partyTpl = text('chatWarn.partyTemplate', '[Solar] {name}: {tag} - {reason}', true);
   p.appendChild(fieldRow('Party message', 'Placeholders: {name} {tag} {reason} {sniper}. Sent as /pc …', partyTpl));
 
