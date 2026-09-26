@@ -312,8 +312,27 @@ function panelNickRoller(p) {
   // Re-check after any toggle/number on this tab changes.
   p.addEventListener('change', () => setTimeout(refresh, 80));
 
-  p.appendChild(header('Pacing & safety', ''));
-  p.appendChild(fieldRow('Delay between rolls (ms)', 'Minimum 700. A small random extra is added so rolls aren\'t perfectly regular.', number('nickRoller.delayMs', 700, 10000, 100)));
+  p.appendChild(header('Pacing', 'Everything here is re-randomized on every roll, so no two rolls look or time the same.'));
+  // A min–max pair on one row; if they cross, the other one follows.
+  const rangeRow = (label, help, minPath, maxPath, lo, hi, step) => {
+    const a = number(minPath, lo, hi, step), b = number(maxPath, lo, hi, step);
+    a.style.width = b.style.width = '80px';
+    const fix = async (src) => {
+      const mn = +a.value, mx = +b.value;
+      if (mx < mn) { if (src === a) { b.value = mn; await set(maxPath, mn); } else { a.value = mx; await set(minPath, mx); } }
+    };
+    a.addEventListener('change', () => fix(a)); b.addEventListener('change', () => fix(b));
+    const w = el('div'); w.style.cssText = 'display:flex;align-items:center;gap:6px';
+    const to = el('span'); to.textContent = 'to'; to.className = 'dim';
+    w.appendChild(a); w.appendChild(to); w.appendChild(b);
+    return fieldRow(label, help, w);
+  };
+  p.appendChild(rangeRow('Random delay between rolls (ms)', 'A new random wait in this range before every roll. Set both the same for a fixed delay. Never below 700.', 'nickRoller.delayMinMs', 'nickRoller.delayMaxMs', 700, 30000, 100));
+  p.appendChild(fieldRow('Human-like mouse movement', 'Glide to TRY AGAIN along a curved path with its own speed each time (sometimes a slight overshoot and correction), then pause briefly before clicking. Off = the cursor jumps straight there.', toggle('nickRoller.humanMouse')));
+  p.appendChild(rangeRow('Movement duration (ms)', 'How long each glide takes, picked at random in this range.', 'nickRoller.moveMinMs', 'nickRoller.moveMaxMs', 60, 2000, 20));
+  p.appendChild(fieldRow('Random click point', 'Click a different spot inside the TRY AGAIN link each time instead of its exact centre.', toggle('nickRoller.randomClickPoint')));
+
+  p.appendChild(header('Safety', ''));
   p.appendChild(fieldRow('Max rolls per run', '', number('nickRoller.maxRolls', 1, 5000, 10)));
   p.appendChild(fieldRow('Minecraft 1.8.9 jar (optional)', 'Only if the font isn\'t found automatically.', text('nickRoller.jarPath', '...\\.minecraft\\versions\\1.8.9\\1.8.9.jar', true)));
 

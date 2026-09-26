@@ -13,6 +13,9 @@
   matching against the real Minecraft font from your local 1.8.9 jar (exact at any GUI scale;
   never guesses). Stops on hotkey, mouse movement, focus loss, missing book or roll limit, and only
   ever clicks while Minecraft is focused. Overlay shows a 🎲 roll counter while running.
+- Nick roller pacing: random delay range between rolls, optional human-like mouse movement
+  (randomized curved glides with variable speed, occasional overshoot, pre-click pause) and a
+  random click point on the link. All configurable, and every roll is re-randomized.
 
 ### Changed
 - Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.

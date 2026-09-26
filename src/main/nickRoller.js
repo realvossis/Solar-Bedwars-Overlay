@@ -10,8 +10,9 @@ const { EventEmitter } = require('events');
 const nameRules = require('./nameRules');
 const { readRolledName } = require('./bookReader');
 
+const human = require('./humanMouse');
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const MIN_DELAY_MS = 700;         // never faster than this between rolls
 const NEW_NAME_TIMEOUT_MS = 7000; // how long to wait for the book to show a new name
 const MOUSE_TAKEOVER_PX = 30;     // you moved the mouse this far from our click -> you want control back
 
@@ -76,7 +77,13 @@ class NickRoller extends EventEmitter {
 
     this.running = true; this.stopReason = null;
     this._status({ running: true, rolls: 0, last: null, history: [], message: 'starting…' });
-    const delay = Math.max(MIN_DELAY_MS, Number(rc.delayMs) || 1200);
+    // Pacing: a fresh random delay per roll; optionally a human-like glide to a random spot on the
+    // link instead of an instant jump to its centre (see humanMouse.js).
+    const pace = {
+      delayMin: rc.delayMinMs ?? 1200, delayMax: rc.delayMaxMs ?? 2200,
+      humanMouse: rc.humanMouse !== false, moveMin: rc.moveMinMs ?? 180, moveMax: rc.moveMaxMs ?? 420,
+      randomClickPoint: rc.randomClickPoint !== false,
+    };
     const maxRolls = Math.max(1, Math.min(5000, Number(rc.maxRolls) || 300));
     const h = this.d.helper;
     let result = null, kind = 'info', message;
@@ -100,15 +107,22 @@ class NickRoller extends EventEmitter {
         if (verdict.ok) { result = read.name; kind = 'match'; message = `Rolled ${read.name} - matches${verdict.hits.length ? ' ' + verdict.hits.join(', ') : ' your requirements'}. Click USE NAME to take it.`; break; }
         if (this.state.rolls >= maxRolls) { message = `Stopped after ${maxRolls} rolls without a match.`; break; }
 
-        await sleep(delay + Math.floor(Math.random() * 400));
+        await sleep(human.nextDelay(pace.delayMin, pace.delayMax));
         if (this.stopReason) break;
         // Hand control back the moment you touch the mouse or leave the game.
-        if (lastClick) {
-          const c = await h.cursor();
-          if (Math.hypot(c.x - lastClick.x, c.y - lastClick.y) > MOUSE_TAKEOVER_PX) { this.stopReason = 'you moved the mouse'; break; }
+        const cur = await h.cursor();
+        if (lastClick && Math.hypot(cur.x - lastClick.x, cur.y - lastClick.y) > MOUSE_TAKEOVER_PX) { this.stopReason = 'you moved the mouse'; break; }
+        const r = read.book.red;
+        const spot = pace.randomClickPoint ? human.pickClickPoint(r) : read.book.tryAgain;
+        const target = { x: crop.x + spot.x, y: crop.y + spot.y };
+        const lostFocus = () => { this.stopReason = 'Minecraft is no longer the focused window'; };
+        if (pace.humanMouse) {
+          const path = human.planPath(cur, target, { minMs: pace.moveMin, maxMs: pace.moveMax });
+          if (!(await h.movePath(path.points, path.dt, win.hwnd))) { lostFocus(); break; }
+          await sleep(human.preClickPause());
+          if (this.stopReason) break;
         }
-        const target = { x: crop.x + read.book.tryAgain.x, y: crop.y + read.book.tryAgain.y };
-        if (!(await h.click(target.x, target.y, win.hwnd))) { this.stopReason = 'Minecraft is no longer the focused window'; break; }
+        if (!(await h.click(target.x, target.y, win.hwnd))) { lostFocus(); break; }
         lastClick = target;
         prev = read.name;
       }

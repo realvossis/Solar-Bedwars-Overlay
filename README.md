@@ -142,8 +142,12 @@ matches. It then stops with the book open, and picking **USE NAME** is your own 
   (M→H, 0→Ø). This matcher works at any GUI scale and refuses to guess: an unclear read stops the run.
 - **Safety stops:** it stops when you press `Alt+N` again, click the 🎲 chip, move the mouse,
   switch away from Minecraft, when the book disappears, or when the roll limit is reached. It only
-  ever clicks while Minecraft is the focused window. The delay between rolls is configurable
-  (minimum 700 ms, with random jitter).
+  ever clicks while Minecraft is the focused window.
+- **Human-like pacing (all configurable):** a random delay range between rolls (never below
+  700 ms), plus optional human-like mouse movement. That's a curved glide with its own speed each
+  time, sometimes a small overshoot, and a short pause before clicking, aimed at a random spot on
+  TRY AGAIN rather than its exact centre. Hypixel's server never sees your cursor; the glide is only
+  what you see on screen.
 - **Requirements to run:** Windows, and borderless or windowed mode (exclusive fullscreen can't be
   captured). A Minecraft 1.8.9 jar must be present; it's found automatically in `.minecraft`, or you
   can set the path.

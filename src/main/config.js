@@ -199,7 +199,7 @@ function defaults() {
     // ---- Nick roller (Alt+N with Hypixel's random-name book open; see nickRoller.js) ----
     // A rolled name is accepted when it passes every enabled check AND matches at least one rule
     // (if any rules are set). jarPath optionally points at a Minecraft 1.8.9 jar for the font.
-    nickRoller: { rules: [], useNameWatch: false, minLength: 0, maxLength: 16, noDigits: false, noUnderscore: false, delayMs: 1200, maxRolls: 300, jarPath: '' },
+    nickRoller: { rules: [], useNameWatch: false, minLength: 0, maxLength: 16, noDigits: false, noUnderscore: false, delayMinMs: 1200, delayMaxMs: 2200, humanMouse: true, moveMinMs: 180, moveMaxMs: 420, randomClickPoint: true, maxRolls: 300, jarPath: '' },
 
     // ---- Row highlight ----
     // Flags a whole row when one stat clears a threshold. Any column key works (built-in,

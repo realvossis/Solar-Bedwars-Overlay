@@ -34,15 +34,17 @@ const run = async () => {
       foreground: async () => ({ hwnd: '42', x: 0, y: 0, width: 1280, height: 720, process }),
       capture: async () => { frame = noBook ? makeFrame(640, 360, [20, 20, 20]) : renderBook(glyphs, names[Math.min(i, names.length - 1)], { unit: 1, width: 640, height: 360 }); },
       cursor: async () => (clicks >= userMovesMouseAfter ? { x: 5, y: 5 } : lastClick),
+      movePath: async (points) => { if (clicks >= loseFocusAfter) return false; moves.push(points.length); lastClick = points[points.length - 1]; return true; },
       click: async (x, y) => { if (clicks >= loseFocusAfter) return false; clicks++; lastClick = { x, y }; i++; return true; },
       stop() {},
     };
     let lastClick = { x: 0, y: 0 };
-    return { helper, clicks: () => clicks, readFrame: () => frame };
+    const moves = [];
+    return { helper, clicks: () => clicks, moves, readFrame: () => frame };
   }
   const make = (s, nickRoller) => new NickRoller({
     helper: s.helper, loadGlyphs: () => glyphs, readFrame: s.readFrame,
-    getConfig: () => ({ nickRoller: { delayMs: 0, maxRolls: 50, ...nickRoller }, nameWatch: { rules: ['Owl'] } }),
+    getConfig: () => ({ nickRoller: { delayMinMs: 0, delayMaxMs: 0, humanMouse: false, moveMinMs: 60, moveMaxMs: 80, maxRolls: 50, ...nickRoller }, nameWatch: { rules: ['Owl'] } }),
   });
   const done = (r) => new Promise((res) => r.once('done', res));
 
@@ -81,9 +83,26 @@ const run = async () => {
     const res = await d; assert.match(res.message, /book not found/i); assert.strictEqual(s.clicks(), 0);
   });
   await t('hotkey stop mid-run', async () => {
-    const s = sim(Array.from({ length: 40 }, (_, k) => 'Name' + k)); const r = make(s, { rules: ['zzz'], delayMs: 700 });
+    const s = sim(Array.from({ length: 40 }, (_, k) => 'Name' + k)); const r = make(s, { rules: ['zzz'], delayMinMs: 700, delayMaxMs: 700 });
     const d = done(r); r.start(); setTimeout(() => r.toggle(), 1200);
     const res = await d; assert.match(res.message, /stopped by hotkey/); assert.ok(s.clicks() <= 2, 'clicks ' + s.clicks());
+  });
+  await t('human mouse: glides before every click, lands inside TRY AGAIN at varying spots', async () => {
+    const s = sim(['Aaa1', 'Bbb2', 'Ccc3', 'Ddd4', 'CatEnd']);
+    const clicksAt = []; const orig = s.helper.click; s.helper.click = async (x, y, h) => { clicksAt.push(x + ',' + y); return orig(x, y, h); };
+    const r = make(s, { rules: ['Cat'], humanMouse: true, randomClickPoint: true }); const d = done(r); await r.start();
+    assert.strictEqual((await d).name, 'CatEnd');
+    assert.strictEqual(s.moves.length, 4, 'one glide per click'); assert.ok(s.moves.every((n) => n >= 1));
+    const red = require('../src/main/bookReader').findBook(renderBook(glyphs, 'x', { unit: 1, width: 640, height: 360 })).red;
+    for (const c of clicksAt) { const [x, y] = c.split(',').map(Number); const lx = x - 320; assert.ok(lx >= red.x0 && lx <= red.x1 && y >= red.y0 && y <= red.y1, 'click outside link: ' + c); }
+  });
+  await t('human mouse off: no glide, straight click', async () => {
+    const s = sim(['Aaa1', 'CatEnd']); const r = make(s, { rules: ['Cat'], humanMouse: false }); const d = done(r); await r.start();
+    await d; assert.strictEqual(s.moves.length, 0); assert.strictEqual(s.clicks(), 1);
+  });
+  await t('losing focus mid-glide stops before clicking', async () => {
+    const s = sim(['Aaa1', 'Bbb2'], { loseFocusAfter: 0 }); const r = make(s, { rules: ['zzz'], humanMouse: true }); const d = done(r); await r.start();
+    assert.match((await d).message, /no longer the focused window/); assert.strictEqual(s.clicks(), 0);
   });
   await t('refuses to start with no requirements', async () => {
     const s = sim(['x']); const r = make(s, { rules: [] }); const d = done(r); await r.start();

@@ -1,11 +1,12 @@
 'use strict';
 // A tiny Windows-only helper for the nick roller: one long-lived PowerShell process hosting a
-// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly four things:
+// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly five things:
 //   fg                   -> the foreground window's handle, process name and client-area rect
 //   cap x y w h          -> screenshot of that screen rectangle, written as raw BGRA to the file
 //                           path fixed at startup (big frames don't belong on a pipe)
 //   click x y hwnd       -> left click at x,y - ONLY if hwnd is still the foreground window, so a
 //                           roll can never click into some other app you alt-tabbed to
+//   path hwnd dt x y ... -> glide the mouse through up to 400 points, dt ms apart (same focus rule)
 //   cursor               -> current mouse position (to notice you taking the mouse back)
 // All arguments are integers parsed and range-checked on the C# side; nothing from the user or
 // the log is ever interpolated into the script. No npm/native dependencies: the C# is compiled
@@ -67,6 +68,16 @@ public static class SolarHelper {
     SendInput(2, inp, Marshal.SizeOf(typeof(INPUT)));
     return "ok";
   }
+  // Plays a mouse path point by point, dt ms apart - timed here rather than one pipe round-trip
+  // per point, so the motion stays smooth. Aborts the moment hwnd stops being the foreground.
+  public static string Path(long hwnd, int dt, long[] pts) {
+    for (int i = 0; i + 1 < pts.Length; i += 2) {
+      if (GetForegroundWindow().ToInt64() != hwnd) return "err notfg";
+      SetCursorPos((int)pts[i], (int)pts[i + 1]);
+      System.Threading.Thread.Sleep(dt);
+    }
+    return "ok";
+  }
   public static string Cursor() { POINT p; GetCursorPos(out p); return "ok " + p.X + " " + p.Y; }
 }
 '@
@@ -87,6 +98,9 @@ while ($true) {
     elseif ($a[0] -eq 'cursor' -and $n.Count -eq 0) { $out = [SolarHelper]::Cursor() }
     elseif ($a[0] -eq 'cap' -and $n.Count -eq 4 -and (& $coordOk $n) -and $n[2] -gt 0 -and $n[3] -gt 0 -and $n[2] * $n[3] -le 40000000) { $out = [SolarHelper]::Cap($n[0], $n[1], $n[2], $n[3], $capPath) }
     elseif ($a[0] -eq 'click' -and $n.Count -eq 3 -and (& $coordOk $n[0..1]) -and $n[2] -gt 0) { $out = [SolarHelper]::Click($n[0], $n[1], $n[2]) }
+    elseif ($a[0] -eq 'path' -and $n.Count -ge 4 -and $n.Count -le 802 -and ($n.Count % 2) -eq 0 -and $n[0] -gt 0 -and $n[1] -ge 1 -and $n[1] -le 50 -and (& $coordOk $n[2..($n.Count - 1)])) {
+      $out = [SolarHelper]::Path($n[0], [int]$n[1], [long[]]$n[2..($n.Count - 1)])
+    }
     else { $out = 'err badcmd' }
   } catch { $out = 'err ' + ($_.Exception.Message -replace '\s+', ' ') }
   [Console]::Out.WriteLine($out)
@@ -150,6 +164,13 @@ class WinHelper {
   }
 
   async click(x, y, hwnd) { return (await this.request(`click ${x | 0} ${y | 0} ${String(hwnd).replace(/\D/g, '')}`)) === 'ok'; }
+
+  // Moves the mouse along points ([{x,y}], at most 400) dt ms apart. false = focus was lost.
+  async movePath(points, dt, hwnd) {
+    const pts = points.slice(0, 400).map((p) => `${p.x | 0} ${p.y | 0}`).join(' ');
+    const r = await this.request(`path ${String(hwnd).replace(/\D/g, '')} ${Math.max(1, Math.min(50, dt | 0))} ${pts}`, points.length * dt + 3000);
+    return r === 'ok';
+  }
 
   async cursor() { const r = (await this.request('cursor')).split(' '); return { x: +r[1], y: +r[2] }; }
 
