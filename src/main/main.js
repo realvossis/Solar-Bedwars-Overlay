@@ -11,6 +11,7 @@ const { Hypixel } = require('./hypixel');
 const { Urchin } = require('./urchin');
 const { Roster } = require('./roster');
 const { LogWatcher, validName } = require('./logWatcher');
+const nameRules = require('./nameRules');
 
 // ---------------- rendering pipeline ----------------
 // The overlay is a transparent, topmost window sitting directly over Minecraft's OpenGL surface.
@@ -293,7 +294,8 @@ function handle(channel, fn) {
 
 const isPlainObject = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const isUuid = (v) => typeof v === 'string' && /^[0-9a-f]{32}$/i.test(v.replace(/-/g, ''));
-const cleanText = (v, max) => String(v == null ? '' : v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
+// Strings only - anything else (objects with hostile toString, numbers, arrays) becomes ''.
+const cleanText = (v, max) => (typeof v === 'string' ? v : '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, max);
 
 // shell.openExternal hands the URL to the OS, so it only ever gets https links to the handful of
 // sites the app actually links to - never file:, custom protocols, or arbitrary hosts.
@@ -396,8 +398,22 @@ function registerIpc() {
     return r.filePaths[0];
   });
 
+  // Settings' live preview: validates a rule list and checks one name against it, using the exact
+  // same engine the overlay uses.
+  handle('nameRules:check', (_e, rules, name) => {
+    const compiled = nameRules.compile(Array.isArray(rules) ? rules.map((r) => cleanText(r, nameRules.MAX_RULE_LENGTH + 1)) : []);
+    return { valid: compiled.rules.length, errors: compiled.errors, hits: nameRules.match(compiled, cleanText(name, 32)) };
+  });
+
   handle('link:open', (_e, url) => openExternalSafe(url));
   handle('log:getStatus', () => lastLogStatus);
+}
+
+// Name Watch rules are compiled once per change, not per player.
+function applyNameWatch() {
+  const nw = getConfig().nameWatch || {};
+  const compiled = nw.enabled === false ? null : nameRules.compile(nw.rules);
+  roster.setMatcher(compiled ? (name) => nameRules.match(compiled, name) : null);
 }
 
 function applySelf() { const cfg = getConfig(); roster.setSelf(cfg.selfName, cfg.hideSelf); }
@@ -415,6 +431,7 @@ function afterConfigChange(patch) {
   if (has('logPath') || has('logEnabled') || has('selfName') || has('reactNames')) startWatcher();
   if (has('selfName') || has('hideSelf')) applySelf();
   if (has('refreshSeconds')) applyRefreshTimer();
+  if (has('nameWatch')) applyNameWatch();
 }
 
 // ---------------- tray + shortcuts ----------------
@@ -485,6 +502,7 @@ if (!app.requestSingleInstanceLock()) {
     watcher = new LogWatcher();
 
     roster.on('update', (list) => broadcast('roster:update', list));
+    roster.on('nameMatch', (row) => { if ((getConfig().nameWatch || {}).notify !== false) toast(`Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn'); });
     wireWatcher();
     registerIpc();
     createSplash();
@@ -493,6 +511,7 @@ if (!app.requestSingleInstanceLock()) {
     registerShortcuts();
     startWatcher();
     applyRefreshTimer();
+    applyNameWatch();
     applySelf(); // your own IGN, if configured, is in the list from the moment the app starts
 
     app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });

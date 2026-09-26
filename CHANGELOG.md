@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Name Watch**: your own list of plain-text or `/regex/` rules, checked against every player on the
+  overlay. Matches get a purple row, a ✦ badge and an optional toast. Includes `.txt` list import,
+  live rule validation and a "test a name" box for checking nicks while rolling by hand.
+
+### Changed
+- Repository moved to github.com/realvossis/Solar-Bedwars-Overlay.
+- IPC text inputs now accept strings only.
+
 ## 1.1.0 — 2026-09-26
 
 ### Fixed

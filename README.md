@@ -119,6 +119,19 @@ messages, so nobody can fake a party join by typing it in public chat.
 Players who leave the pre-game lobby ("X has quit!") stay listed but faded. The title bar shows
 your party size and a ⚠ count of threats in the lobby (blacklisted, or sniper score ≥ 70).
 
+### Name Watch (Settings → Name Watch)
+Your own list of names or patterns, one per line, checked against every player on the overlay.
+Plain text matches anywhere in a name, ignoring case (`Cat` matches *xXCatLover*). A regex goes
+between slashes (`/^[a-z]{3,4}$/i`). Lines starting with `#` are comments. Matching players get a
+purple row, a ✦ next to their name and, optionally, a toast. You can import a `.txt` word list,
+and a **Test a name** box shows instantly whether a name hits your list. That's handy for checking
+a nick while you roll one by hand.
+
+> Why no automatic nick roller? Rolled nicks only appear inside Hypixel's nick book GUI and never
+> reach the log file the overlay reads. Automating the rolls would need an in-game mod (not possible
+> on Lunar) or an external program clicking for you, which is a macro under Hypixel's rules and
+> risks your account.
+
 ### Auto-triggers (Settings → Triggers)
 Auto-flag players to your local watchlist when they: **say your name in chat**, **join your party**,
 **invite you**, **DM you**, or **friend-request you**. All five are **on by default** — the overlay

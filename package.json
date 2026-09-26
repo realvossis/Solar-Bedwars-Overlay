@@ -9,7 +9,12 @@
     "test": "node test/run.js",
     "dist": "electron-builder --win"
   },
-  "author": "Nath (nvossaert)",
+  "author": "Nath (realvossis)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/realvossis/Solar-Bedwars-Overlay.git"
+  },
+  "homepage": "https://github.com/realvossis/Solar-Bedwars-Overlay",
   "license": "MIT",
   "devDependencies": {
     "electron": "^39.8.10",

@@ -151,6 +151,7 @@ const TABS = {
   General: panelGeneral,
   'Log & Detection': panelLog,
   Triggers: panelTriggers,
+  'Name Watch': panelNameWatch,
   'API Keys': panelApi,
   Connections: panelConnections,
   Appearance: panelAppearance,
@@ -200,6 +201,66 @@ function panelTriggers(p) {
   const clear = el('button', 'ghost'); clear.textContent = 'Clear local watchlist';
   clear.onclick = async () => { await set('watchlist', {}); toast('Watchlist cleared', 'ok'); };
   p.appendChild(fieldRow('Reset watchlist', 'Remove all locally auto-flagged players.', clear));
+}
+
+function panelNameWatch(p) {
+  p.appendChild(header('Name Watch', 'Your own list of names or patterns. Every player on the overlay is checked against it; matches are highlighted in purple with a ✦ and (optionally) a toast.'));
+  p.appendChild(fieldRow('Enable Name Watch', '', toggle('nameWatch.enabled')));
+  p.appendChild(fieldRow('Notify on match', 'Toast when a matching player shows up.', toggle('nameWatch.notify')));
+
+  const help = el('div', 'kv');
+  help.innerHTML = 'One rule per line. <b>Plain text</b> matches anywhere in a name, ignoring case — <span class="pill">Cat</span> matches <i>xXCatLover</i>. ' +
+    '<b>Regex</b> goes between slashes — <span class="pill">/^[a-z]{3,4}$/i</span> matches any 3–4 letter name. Lines starting with <span class="pill">#</span> are comments.';
+  p.appendChild(help);
+
+  const ta = el('textarea');
+  ta.spellcheck = false;
+  ta.style.cssText = 'width:100%;height:190px;margin-top:10px;font-family:Consolas,monospace;font-size:12px;box-sizing:border-box';
+  ta.placeholder = '# e.g.\nCat\n/^[A-Z][a-z]+$/\n/^.{3}$/';
+  ta.value = ((cfg.nameWatch || {}).rules || []).join('\n');
+  const status = el('div', 'kv'); status.style.marginTop = '6px';
+  const splitLines = (text) => String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const linesOf = () => splitLines(ta.value);
+
+  // Live validation + test, both answered by the same engine the overlay runs.
+  const testIn = el('input'); testIn.type = 'text'; testIn.placeholder = 'paste a name / nick to test'; testIn.style.width = '220px'; testIn.maxLength = 32;
+  const testOut = el('span'); testOut.style.cssText = 'margin-left:10px;font-size:12px';
+  async function refresh() {
+    const r = await api.checkNameRules(linesOf(), testIn.value.trim());
+    status.innerHTML = `<span class="ok">${r.valid} valid rule${r.valid === 1 ? '' : 's'}</span>` +
+      r.errors.map((e) => `<div class="bad">✕ ${esc(e.source)} — ${esc(e.error)}</div>`).join('');
+    if (!testIn.value.trim()) testOut.textContent = '';
+    else if (r.hits.length) testOut.innerHTML = `<span class="ok">✓ match: ${esc(r.hits.join(', '))}</span>`;
+    else testOut.innerHTML = '<span class="bad">no match</span>';
+  }
+  let t = null;
+  ta.oninput = () => { clearTimeout(t); t = setTimeout(refresh, 250); };
+  ta.onchange = async () => { await set('nameWatch.rules', linesOf()); toast('Name Watch rules saved', 'ok'); };
+  testIn.oninput = refresh;
+  p.appendChild(ta); p.appendChild(status);
+
+  // Import a word list (.txt, one entry per line) - read locally in this window, never uploaded.
+  const file = el('input'); file.type = 'file'; file.accept = '.txt,text/plain'; file.style.display = 'none';
+  file.onchange = () => {
+    const f = file.files && file.files[0]; if (!f) return;
+    if (f.size > 256 * 1024) { toast('File too large (max 256 KB)', 'err'); return; }
+    const rd = new FileReader();
+    rd.onload = async () => {
+      const merged = [...new Set([...linesOf(), ...splitLines(rd.result)])];
+      ta.value = merged.join('\n'); await set('nameWatch.rules', linesOf()); refresh(); toast('Imported ' + f.name, 'ok');
+    };
+    rd.readAsText(f); file.value = '';
+  };
+  const imp = el('button', 'ghost'); imp.textContent = 'Import .txt list…'; imp.onclick = () => file.click();
+  const clr = el('button', 'ghost'); clr.textContent = 'Clear all'; clr.style.marginLeft = '8px';
+  clr.onclick = async () => { ta.value = ''; await set('nameWatch.rules', []); refresh(); };
+  const btns = el('div'); btns.style.marginTop = '8px'; btns.appendChild(imp); btns.appendChild(clr); btns.appendChild(file);
+  p.appendChild(btns);
+
+  const testRow = el('div'); testRow.style.cssText = 'display:flex;align-items:center';
+  testRow.appendChild(testIn); testRow.appendChild(testOut);
+  p.appendChild(fieldRow('Test a name', 'Rolling a nick by hand? Paste it here to see instantly if it hits your list.', testRow));
+  refresh();
 }
 
 function panelApi(p) {

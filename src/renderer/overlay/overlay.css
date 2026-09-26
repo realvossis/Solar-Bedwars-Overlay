@@ -108,6 +108,10 @@ tbody tr.team{background:rgba(63,185,80,.13);box-shadow:inset 3px 0 0 #3fb950}
 tbody tr.team:hover{background:rgba(63,185,80,.2)}
 /* Quit the pre-game lobby ("X has quit!") - kept, but faded so the list reflects who's still here. */
 tbody tr.left td:not(.actionscell){opacity:.4}
+/* Name Watch hit (your own rule list) - purple, a color no threat/party state uses. */
+tbody tr.namewatch{background:rgba(188,140,255,.14);box-shadow:inset 3px 0 0 #bc8cff}
+tbody tr.namewatch:hover{background:rgba(188,140,255,.22)}
+.nwmark{margin-left:4px;color:#bc8cff;font-size:10px;cursor:help}
 tbody tr.left .name{text-decoration:line-through;text-decoration-color:rgba(255,255,255,.35)}
 
 .name{font-weight:600}

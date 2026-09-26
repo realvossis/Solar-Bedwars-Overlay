@@ -191,6 +191,11 @@ function defaults() {
       freshAccount: 14, // low star / freshly-joined account that's already good -> classic smurf signal
     },
 
+    // ---- Name Watch ----
+    // Your own list of name rules (plain text or /regex/flags, one per entry), checked against
+    // every player on the overlay - see nameRules.js. Matches get highlighted, optionally toasted.
+    nameWatch: { enabled: true, notify: true, rules: [] },
+
     // ---- Row highlight ----
     // Flags a whole row when one stat clears a threshold. Any column key works (built-in,
     // custom, or catalog), not just fkdr — just what most people care about by default.

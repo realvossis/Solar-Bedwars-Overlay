@@ -64,5 +64,25 @@ t('party members are never marked as left', () => {
   assert.ok(!r.players.get('p').left);
 });
 
+t('Name Watch: new players are matched and announced once', () => {
+  const r = make(); const seen = [];
+  r.on('nameMatch', (row) => seen.push(row.name));
+  r.setMatcher((n) => (/cat/i.test(n) ? ['cat'] : []));
+  r.addNames(['CatLover', 'Dog'], 'GAME'); r.addNames(['CatLover'], 'GAME');
+  assert.deepStrictEqual(r.players.get('catlover').nameMatch, ['cat']);
+  assert.deepStrictEqual(r.players.get('dog').nameMatch, []);
+  assert.deepStrictEqual(seen, ['CatLover']);
+});
+t('Name Watch: changing rules re-checks existing rows silently', () => {
+  const r = make(); const seen = [];
+  r.on('nameMatch', (row) => seen.push(row.name));
+  r.addNames(['Dog'], 'GAME');
+  r.setMatcher((n) => (n === 'Dog' ? ['Dog'] : []));
+  assert.deepStrictEqual(r.players.get('dog').nameMatch, ['Dog']);
+  r.setMatcher(null);
+  assert.deepStrictEqual(r.players.get('dog').nameMatch, []);
+  assert.deepStrictEqual(seen, []);
+});
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

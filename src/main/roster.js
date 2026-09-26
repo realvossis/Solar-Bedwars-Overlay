@@ -22,6 +22,20 @@ class Roster extends EventEmitter {
     this.players = new Map();   // lowerName -> row
     this._queue = [];
     this._active = 0;
+    this._matchFn = () => [];
+  }
+
+  // Name Watch: fn(name) -> matched rule sources. Re-checks everyone already listed whenever the
+  // rules change, and emits 'nameMatch' the first time a row starts matching.
+  setMatcher(fn) {
+    this._matchFn = typeof fn === 'function' ? fn : () => [];
+    for (const row of this.players.values()) this._rematch(row, false);
+    this._emit();
+  }
+  _rematch(row, announce = true) {
+    const before = (row.nameMatch || []).length;
+    row.nameMatch = this._matchFn(row.name);
+    if (announce && !before && row.nameMatch.length && row.source !== 'SELF') this.emit('nameMatch', row);
   }
 
   list() { return [...this.players.values()]; }
@@ -66,6 +80,7 @@ class Roster extends EventEmitter {
       }
       const row = { name, key, uuid: null, source, addedAt: Date.now(), loading: true };
       this.players.set(key, row);
+      this._rematch(row);
       this._enqueue(row);
     }
     this._emit();
@@ -94,6 +109,7 @@ class Roster extends EventEmitter {
       if (!resolved) { row.loading = false; row.nicked = true; row.error = 'nicked'; this._emit(); return; }
       row.uuid = resolved.id;
       row.name = resolved.name; // fix casing
+      this._rematch(row, false); // case-sensitive regex rules may only match the real casing
 
       // monthlyResp/winstreaksResp are Urchin's own player-stats endpoints (Coral API), separate
       // from the blacklist lookup above - both no-op internally (return null, no request) if

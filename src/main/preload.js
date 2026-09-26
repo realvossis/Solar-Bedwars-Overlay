@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('solarBridge', {
   addLocalTag: (uuid, tag) => invoke('urchin:addLocal', uuid, tag),
   addWatchlist: (name, reason) => invoke('watchlist:add', name, reason),
   lookupName: (name) => invoke('lookup:name', name),
+  checkNameRules: (rules, name) => invoke('nameRules:check', rules, name),
 
   // utils
   testKey: () => invoke('key:test'),

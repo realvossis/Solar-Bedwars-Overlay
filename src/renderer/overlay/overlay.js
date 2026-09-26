@@ -48,6 +48,10 @@ const SOURCE_BADGE = {
 // Best-effort de-nick hint (see main.js/hypixel.findByFinalKills): the killer's own reported
 // final-kill count matched someone this app has already seen stats for. Only a suggestion —
 // there's no way to search all of Hypixel by stat, this is limited to previously-seen players.
+function nameWatchMark(row){
+  if(!row.nameMatch || !row.nameMatch.length) return '';
+  return `<span class="nwmark" title="Name Watch: matches ${esc(row.nameMatch.join(', '))}">✦</span>`;
+}
 function denickMark(row){
   const h = row.denickHint;
   if(!h || !h.candidates || !h.candidates.length) return '';
@@ -295,7 +299,7 @@ function cell(row, key){
     }
     case 'name':{
       td.className='name';
-      const denick = denickMark(row);
+      const denick = nameWatchMark(row) + denickMark(row);
       if(row.nicked){ td.innerHTML=`<span class="nick">${esc(row.name)}</span>${denick}`; }
       else if(row.apiError){ td.innerHTML=`${esc(row.name)} <span class="err">${esc(row.apiError)}</span>${denick}`; }
       else {
@@ -355,6 +359,7 @@ function render(){
     if(row.nicked) tr.classList.add('nicked');
     if(row.source==='SELF' || row.source==='PARTY') tr.classList.add('team');
     if(row.left) tr.classList.add('left');
+    if(row.nameMatch && row.nameMatch.length) tr.classList.add('namewatch');
     if(hlStat){
       const v = sortVal(row, hlStat);
       if(typeof v==='number' && v >= (cfg.highlightThreshold ?? Infinity)) tr.classList.add('highlight');
@@ -392,11 +397,15 @@ let tipEl=null;
 function showTip(e,row){
   hideTip();
   const s=row.stats, sn=row.sniper, u=row.urchin;
-  if(!s && !(u&&u.tags&&u.tags.length) && !row.denickHint && !row.nicked) return;
+  const nw = row.nameMatch && row.nameMatch.length;
+  if(!s && !(u&&u.tags&&u.tags.length) && !row.denickHint && !row.nicked && !nw) return;
   tipEl = el('div','tip');
   let html = `<div class="row"><b>${esc(row.displayName||row.name)}</b></div>`;
   if(row.nicked){
     html += `<div class="row" style="color:#22d3ee"><b>Nicked — real identity unknown</b></div>`;
+  }
+  if(nw){
+    html += `<div class="row" style="color:#bc8cff"><b>Name Watch:</b> ${esc(row.nameMatch.join(', '))}</div>`;
   }
   if(s){
     html += `<div class="row">${s.star}✫ · FKDR ${s.fkdr.toFixed(2)} · WLR ${s.wlr.toFixed(2)} · WS ${s.winstreak==null?'?':s.winstreak}</div>`;
