@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell, session, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell, session, screen, clipboard } = require('electron');
 const path = require('path');
 
 // Dev-only: point a `npm run dev` session at a throwaway profile (SOLAR_USER_DATA=some/dir) so
@@ -15,6 +15,7 @@ const nameRules = require('./nameRules');
 const fs = require('fs');
 const { NickRoller, buildRequirements } = require('./nickRoller');
 const { Notifier, raiseInactive } = require('./notifications');
+const chatWarn = require('./chatWarn');
 const statsLib = require('./stats');
 const { WinHelper } = require('./winHelper');
 const { loadFont } = require('./bookReader');
@@ -116,7 +117,7 @@ function finishSplash() {
 //   always - always shown; Alt+B still hides it and that choice sticks.
 // Notifications are separate and keep working in every mode.
 let splashFinished = false, inMatch = false, overlayOverride = null, matchStartTimer = null, lobbyTimer = null;
-let currentGametype = null;
+let currentGametype = null, currentMode = null;
 const overlayMode = () => { const m = getConfig().overlayMode; return m === 'manual' || m === 'always' ? m : 'auto'; };
 function overlayWanted() {
   if (overlayOverride !== null) return overlayOverride;
@@ -280,6 +281,7 @@ function wireWatcher() {
       // start with a pre-game lobby worth scouting (hidden later by the start banner); any other
       // game (Duels, SkyWars, ...) counts as "in a match" right away. No mode = a lobby.
       currentGametype = info.gametype || null;
+      currentMode = info.mode || null;
       setInMatch(!!info.mode && info.gametype !== 'BEDWARS');
     } else {
       // Plain-text fallback ("Sending you to ...") can't say where to - wait briefly for the exact
@@ -292,6 +294,7 @@ function wireWatcher() {
     // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
     if (info && info.server !== undefined) currentServer = info.server;
     threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
+    partyWarned.clear(); partyWarnQueue.length = 0; publicWarnIndex = 0; pendingDodge = null; dodgedThisLobby = false;
     if (getConfig().clearOnServerChange) roster.clear();
     if (pendingHouseOwner && Date.now() - pendingHouseOwnerTs < 8000) roster.addNames([pendingHouseOwner], 'house');
     pendingHouseOwner = null;
@@ -393,14 +396,20 @@ const threatsAlerted = new Set();
 function lobbyAlertsAllowed() {
   return (getConfig().notifications || {}).bedwarsOnly === false || !currentGametype || currentGametype === 'BEDWARS';
 }
-function checkThreat(row) {
-  if (!lobbyAlertsAllowed()) return;
-  if (row.source === 'SELF' || row.source === 'PARTY' || row.left || threatsAlerted.has(row.key)) return;
+// Blacklisted (strong tag) or sniper score at/above the threshold; never you or your party.
+function isThreat(row) {
+  if (!row || row.source === 'SELF' || row.source === 'PARTY' || row.left || row.nicked) return false;
   const min = Number((getConfig().notifications || {}).threatMinSniper) || 70;
+  return ((row.urchin && row.urchin.severity) || 0) >= 0.6 || ((row.sniper && row.sniper.score) || 0) >= min;
+}
+function checkThreat(row) {
+  maybeDodge(row);
+  if (!isThreat(row)) return;
+  maybeWarnParty(row);
+  if (!lobbyAlertsAllowed() || threatsAlerted.has(row.key)) return;
   const u = row.urchin || {};
   const flagged = (u.severity || 0) >= 0.6;
   const score = (row.sniper && row.sniper.score) || 0;
-  if (!flagged && score < min) return;
   threatsAlerted.add(row.key);
   const top = u.primary;
   const text = flagged && top ? `${top.label || 'Blacklisted'}${top.reason ? ': ' + top.reason : ''}` : `Sniper score ${score} (${row.sniper.label})`;
@@ -419,6 +428,124 @@ function checkNick(row) {
   if (mine.includes(row.key)) return;
   nicksAlerted.add(row.key);
   notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
+}
+
+// ---------------- chat warnings ----------------
+// Two ways to warn about a flagged player (Settings -> Chat Warnings):
+//  - party (auto, off by default): one /pc message per flagged player, only in the Bedwars pre-game
+//    lobby, only when you're in a party, rate-limited and capped per lobby - never mid-match.
+//  - public (Alt+W): types the warning into chat but does NOT send it; you read it and press Enter
+//    yourself (or Esc). Tags can be wrong - a public accusation stays your decision.
+// Text reaches the game via the clipboard (restored afterwards) and the helper's 'chat' command,
+// which only acts on a focused Minecraft window. Messages come from chatWarn.js (100-char limit,
+// illegal chat characters removed).
+let chatHelper = null, chatBusy = false, lastPartyWarn = 0, publicWarnIndex = 0;
+const partyWarned = new Set(), partyWarnQueue = [];
+const cwCfg = () => getConfig().chatWarn || {};
+
+// The player's own chat key from Minecraft's options.txt (next to the logs folder). LWJGL 2 key
+// codes are keyboard scan codes. Falls back to T (20).
+function chatKeyScan() {
+  try {
+    const opts = path.join(path.dirname(path.dirname(getConfig().logPath || '')), 'options.txt');
+    const m = fs.readFileSync(opts, 'latin1').match(/^key_key\.chat:(-?\d+)/m);
+    const code = m ? parseInt(m[1], 10) : 20;
+    return code >= 1 && code <= 255 ? code : 20;
+  } catch (_) { return 20; }
+}
+
+async function typeIntoChat(text, send) {
+  if (process.platform !== 'win32') return 'unsupported';
+  if (chatBusy || (nickRoller && nickRoller.running)) return 'busy';
+  chatBusy = true;
+  let saved = null;
+  try {
+    if (!chatHelper) chatHelper = new WinHelper(path.join(app.getPath('userData'), 'chat.frame'));
+    await chatHelper.start();
+    // Cheap check first, without touching your clipboard: while you're tabbed out (the usual reason
+    // for a retry) the clipboard is never used at all.
+    const fg = await chatHelper.foreground();
+    if (!fg || !/^javaw?$/i.test(fg.process || '')) return 'notmc';
+    saved = clipboard.readText();
+    clipboard.writeText(text);
+    return await chatHelper.chat(chatKeyScan(), send);
+  } catch (e) {
+    return 'error: ' + String(e.message || e);
+  } finally {
+    if (saved !== null) {
+      // Give the game a moment to read the paste, then put your clipboard back - before the next
+      // chat action can start (chatBusy is still held), so it can never save our text as "yours".
+      await new Promise((r) => setTimeout(r, 300));
+      if (clipboard.readText() === text) clipboard.writeText(saved);
+    }
+    chatBusy = false;
+  }
+}
+
+function maybeWarnParty(row) {
+  const c = cwCfg();
+  if (!c.partyAuto || partyWarned.has(row.key)) return;
+  if (currentGametype !== 'BEDWARS' || !currentMode || inMatch) return; // Bedwars pre-game lobby only
+  if (![...roster.players.values()].some((r) => r.source === 'PARTY')) return; // no party, no /pc
+  if (partyWarned.size >= (Number(c.maxPartyPerLobby) || 4)) return;
+  partyWarned.add(row.key);
+  partyWarnQueue.push(row.key);
+}
+// Drains the queue with a gap between messages; waits while Minecraft isn't focused, and drops
+// everything once the match starts or you leave.
+setInterval(async () => {
+  if (chatBusy) return;
+  if (pendingDodge) { await runDodge(); return; }
+  if (!partyWarnQueue.length) return;
+  if (inMatch || currentGametype !== 'BEDWARS' || !currentMode) { partyWarnQueue.length = 0; return; }
+  if (Date.now() - lastPartyWarn < 3500) return;
+  const row = roster && roster.players.get(partyWarnQueue[0]);
+  if (!row) { partyWarnQueue.shift(); return; }
+  const r = await typeIntoChat(chatWarn.compose(cwCfg().partyTemplate, row, { party: true }), true);
+  if (r === 'ok') { partyWarnQueue.shift(); lastPartyWarn = Date.now(); }
+  else if (!/^(notmc|notfg|keysheld|busy)$/.test(r)) { partyWarnQueue.shift(); console.warn('party warn failed:', r); }
+}, 1000);
+
+// ---- auto-dodge ----
+// Leaves the Bedwars pre-game lobby (with your configured command, '/l bedwars' by default) the first
+// time a player there crosses one of your limits. Once per lobby; never after the countdown's last
+// second, never mid-match, never for you or your party. Off by default.
+let pendingDodge = null, dodgedThisLobby = false;
+const dodgeCfg = () => getConfig().autoDodge || {};
+function inBedwarsPregame() { return currentGametype === 'BEDWARS' && !!currentMode && !inMatch && !matchStartTimer; }
+function maybeDodge(row) {
+  const c = dodgeCfg();
+  if (!c.enabled || dodgedThisLobby || pendingDodge || !inBedwarsPregame()) return;
+  const reason = chatWarn.dodgeReason(row, c);
+  if (!reason) return;
+  dodgedThisLobby = true;
+  pendingDodge = { command: chatWarn.safeCommand(c.command), reason, since: Date.now() };
+  notifyUser('dodge', { title: 'Leaving this lobby', player: row.name, text: reason + ' - running ' + pendingDodge.command }, 'Dodging: ' + reason, 'warn');
+}
+async function runDodge() {
+  const d = pendingDodge;
+  if (!inBedwarsPregame()) { pendingDodge = null; return; } // countdown over / already left: too late
+  const r = await typeIntoChat(d.command, true);
+  if (r === 'ok') pendingDodge = null;
+  else if (!/^(notmc|notfg|keysheld|busy)$/.test(r)) { pendingDodge = null; toast('Auto-dodge failed (' + r + ')', 'warn'); }
+  // notmc/notfg/keysheld: you're tabbed out or busy - retried every second while still in this lobby.
+}
+
+// Alt+W: the next flagged player in this lobby (cycles on repeated presses), typed into chat unsent.
+async function publicWarn() {
+  const threats = [...roster.players.values()].filter(isThreat)
+    .sort((a, b) => (((b.urchin && b.urchin.severity) || 0) - ((a.urchin && a.urchin.severity) || 0)) || (((b.sniper && b.sniper.score) || 0) - ((a.sniper && a.sniper.score) || 0)));
+  if (!threats.length) { toast('No flagged players in this lobby'); return; }
+  const row = threats[publicWarnIndex++ % threats.length];
+  const r = await typeIntoChat(chatWarn.compose(cwCfg().publicTemplate, row), false);
+  if (r === 'notmc' || r === 'notfg') toast('Alt+W: focus Minecraft first');
+  else if (r !== 'ok') toast('Could not type into chat (' + r + ')', 'warn');
+}
+let chatHotkeyBound = false;
+function applyChatWarnHotkey() {
+  const want = cwCfg().hotkey !== false && process.platform === 'win32';
+  if (want && !chatHotkeyBound) chatHotkeyBound = globalShortcut.register('Alt+W', publicWarn);
+  if (!want && chatHotkeyBound) { globalShortcut.unregister('Alt+W'); chatHotkeyBound = false; }
 }
 
 // ---------------- F11 fullscreen fix ----------------
@@ -691,6 +818,13 @@ function registerIpc() {
     return { empty: req.empty, errors: req.errors, result: n ? req.test(n) : null, font, platform: process.platform };
   });
 
+  // Settings preview of both chat templates against a sample flagged player.
+  handle('chatWarn:safeCommand', (_e, cmd) => chatWarn.safeCommand(cleanText(cmd, 80)));
+  handle('chatWarn:preview', (_e, party, pub) => {
+    const sample = { name: 'Sheplock', urchin: { tags: [{ type: 'Blatant Cheater', reason: 'blatant legitscaff, killaura, reach - reported by 4 people in the last week', severity: 1 }] }, sniper: { score: 93 }, stats: { fkdr: 11.4, star: 912 } };
+    return { party: chatWarn.compose(cleanText(party, 300), sample, { party: true }), public: chatWarn.compose(cleanText(pub, 300), sample), chatKey: chatKeyScan() };
+  });
+
   handle('link:open', (_e, url) => openExternalSafe(url));
   handle('log:getStatus', () => lastLogStatus);
 }
@@ -719,6 +853,7 @@ function afterConfigChange(patch) {
   if (has('refreshSeconds')) applyRefreshTimer();
   if (has('overlayMode')) { overlayOverride = null; applyOverlayVisibility(); }
   if (has('fullscreenFix')) applyFullscreenFix();
+  if (has('chatWarn')) applyChatWarnHotkey();
   if (has('nameWatch')) applyNameWatch();
 }
 
@@ -759,6 +894,7 @@ function registerShortcuts() {
   bind('Alt+S', openSettings);
   bind('Alt+N', toggleNickRoller);
   bind('Alt+T', visibilityCheck);
+  applyChatWarnHotkey();
 }
 
 // ---------------- security baseline ----------------
@@ -832,5 +968,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); if (chatHelper) chatHelper.stop(); });
 }

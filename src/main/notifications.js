@@ -33,6 +33,7 @@ const EVENTS = {
   friendRequest: 'Friend request',
   threat: 'Threat joins your lobby (blacklisted or high sniper score)',
   nicked: 'Nicked player joins your lobby',
+  dodge: 'Auto-dodge leaves a lobby',
   nameWatch: 'Name Watch match',
 };
 

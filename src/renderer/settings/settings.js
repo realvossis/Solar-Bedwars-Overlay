@@ -154,6 +154,7 @@ const TABS = {
   Notifications: panelNotifications,
   'Name Watch': panelNameWatch,
   'Nick Roller': panelNickRoller,
+  'Chat & Dodge': panelChatDodge,
   'API Keys': panelApi,
   Connections: panelConnections,
   Appearance: panelAppearance,
@@ -213,6 +214,7 @@ const NOTIFY_EVENTS = [
   ['friendRequest', 'Friend request'],
   ['threat', 'Threat joins your lobby'],
   ['nicked', 'Nicked player joins your lobby'],
+  ['dodge', 'Auto-dodge leaves a lobby'],
   ['nameWatch', 'Name Watch match'],
 ];
 function panelNotifications(p) {
@@ -247,6 +249,51 @@ function panelNotifications(p) {
     for (const kind of ['popup', 'sound']) { const c = el('div', 't'); c.appendChild(toggle(`notifications.events.${key}.${kind}`)); grid.appendChild(c); }
   }
   p.appendChild(grid);
+}
+
+function panelChatDodge(p) {
+  p.appendChild(header('Chat & Dodge', 'Let Solar type into Minecraft\'s chat for you: warn your party about flagged players, prepare a public warning, or leave a lobby automatically.'));
+  const note = el('div', 'note');
+  const ni = el('span', 'ic'); ni.innerHTML = SolarIcons.info;
+  const nt = el('div'); nt.textContent = 'Solar only types while Minecraft has been your focused window for a moment, waits until you let go of any key or mouse button, and stops the instant you tab out. It never types into another program. Windows only.';
+  note.appendChild(ni); note.appendChild(nt); p.appendChild(note);
+
+  p.appendChild(header('Warn your party', 'One party-chat message per flagged player, only in the Bedwars pre-game lobby and only when you\'re in a party. Sent automatically.'));
+  p.appendChild(fieldRow('Auto-warn party', 'Off by default.', toggle('chatWarn.partyAuto')));
+  p.appendChild(fieldRow('Max messages per lobby', 'Keeps it well clear of Hypixel\'s spam filter.', number('chatWarn.maxPartyPerLobby', 1, 8, 1)));
+  const partyTpl = text('chatWarn.partyTemplate', '[Solar] {name}: {tag} - {reason}', true);
+  p.appendChild(fieldRow('Party message', 'Placeholders: {name} {tag} {reason} {sniper}. Sent as /pc …', partyTpl));
+
+  p.appendChild(header('Public warning (Alt+W)', 'Press Alt+W in game: the warning for the next flagged player is typed into chat but NOT sent. You read it and press Enter, or Esc to drop it. Press Alt+W again for the next player.'));
+  p.appendChild(fieldRow('Alt+W hotkey', '', toggle('chatWarn.hotkey')));
+  const pubTpl = text('chatWarn.publicTemplate', 'Heads up: {name} is listed as {tag} - {reason}', true);
+  p.appendChild(fieldRow('Public message', 'Placeholders: {name} {tag} {reason} {sniper}.', pubTpl));
+
+  const prev = el('div', 'kv'); prev.style.cssText = 'font-family:Consolas,monospace;font-size:12px;line-height:1.7;margin-top:8px';
+  async function refresh() {
+    const r = await api.chatWarnPreview(partyTpl.value, pubTpl.value);
+    prev.innerHTML = '<b>Preview</b> (long tag, fitted to Minecraft\'s 100-character limit):<br>' +
+      `party&nbsp; <span class="ok">${esc(r.party)}</span> <span class="dim">(${r.party.length})</span><br>` +
+      `public <span class="ok">${esc(r.public)}</span> <span class="dim">(${r.public.length})</span><br>` +
+      `<span class="dim">Chat key read from your Minecraft options: code ${r.chatKey}${r.chatKey === 20 ? ' (T)' : ''}</span>`;
+  }
+  partyTpl.addEventListener('input', refresh); pubTpl.addEventListener('input', refresh);
+  p.appendChild(prev); refresh();
+
+  p.appendChild(header('Auto-dodge', 'Leave the Bedwars pre-game lobby automatically when someone crosses one of your limits. Once per lobby, never after the countdown\'s last second, never for you or your party. A popup tells you who triggered it.'));
+  p.appendChild(fieldRow('Enable auto-dodge', 'Off by default.', toggle('autoDodge.enabled')));
+  p.appendChild(fieldRow('Leave if someone is blacklisted', '', toggle('autoDodge.onTagged')));
+  p.appendChild(fieldRow('Leave if FKDR is at least', '0 = off', number('autoDodge.fkdrAbove', 0, 100, 0.5)));
+  p.appendChild(fieldRow('Leave if sniper score is at least', '0 = off', number('autoDodge.sniperAbove', 0, 100, 5)));
+  p.appendChild(fieldRow('Leave if someone is nicked', '', toggle('autoDodge.onNicked')));
+  const cmd = text('autoDodge.command', '/l bedwars');
+  const cmdOut = el('span'); cmdOut.style.cssText = 'margin-left:8px;font-size:11.5px';
+  const cmdRow = el('div'); cmdRow.style.cssText = 'display:flex;align-items:center'; cmdRow.appendChild(cmd); cmdRow.appendChild(cmdOut);
+  cmd.addEventListener('input', async () => {
+    const safe = await api.safeDodgeCommand(cmd.value);
+    cmdOut.innerHTML = safe === cmd.value.trim() ? '<span class="ok">✓</span>' : `<span class="bad">will use ${esc(safe)}</span>`;
+  });
+  p.appendChild(fieldRow('Leave command', 'A plain slash command, e.g. /l bedwars or /play bedwars_eight_one. In a party, only the leader leaving takes everyone along.', cmdRow));
 }
 
 function panelNameWatch(p) {
@@ -751,7 +798,8 @@ function panelAbout(p) {
       <span class="pill">Alt+C</span> clear list &nbsp;
       <span class="pill">Alt+S</span> settings &nbsp;
       <span class="pill">Alt+N</span> start/stop nick roller &nbsp;
-      <span class="pill">Alt+T</span> test notification in-game<br>
+      <span class="pill">Alt+T</span> test notification in-game &nbsp;
+      <span class="pill">Alt+W</span> chat warning (not sent)<br>
       Right-click a column header → toggle columns. Drag headers to reorder. Click header to sort.<br>
       Right-click a player row → Plancke, NameMC, copy, local tag, watchlist, remove.<br>
       Party members are picked up automatically (invites, joins, party chat, summons, /p list) — no need to run /p list.<br>
@@ -785,7 +833,7 @@ function groupSections(p) {
 
 // ---------- shell ----------
 const TAB_ICONS = {
-  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice',
+  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice', 'Chat & Dodge': 'at',
   'API Keys': 'key', Connections: 'link', Appearance: 'palette', Columns: 'columns', 'Sniper Score': 'target', Performance: 'gauge', About: 'info',
 };
 let active = 'General';

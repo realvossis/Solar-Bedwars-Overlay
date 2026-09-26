@@ -36,6 +36,7 @@ system tray.
 | `Alt+C` | Clear the player list |
 | `Alt+S` | Open settings |
 | `Alt+N` | Start / stop the nick roller |
+| `Alt+W` | Type a warning about the next flagged player into chat (not sent - you press Enter) |
 | `Alt+T` | Test notification in-game (+ visibility diagnostics) |
 | `Alt+N` | Start / stop the nick roller |
 
@@ -178,6 +179,17 @@ is meant to work out of the box — but each is an independent toggle if you wan
 `Settings → Appearance → Hide from screen capture` uses Electron's `setContentProtection`
 (→ `WDA_EXCLUDEFROMCAPTURE` on Windows), so the overlay is invisible to OBS, Discord screen-share,
 and screenshots while still visible to you. On by default.
+
+### Chat warnings & auto-dodge (Settings → Chat & Dodge)
+Solar can type into Minecraft's chat for you (Windows):
+- **Warn your party** (off by default): one `/pc` message per flagged player in the Bedwars pre-game lobby.
+- **Alt+W**: types a public warning for the next flagged player - never sent automatically; you press Enter.
+- **Auto-dodge** (off by default): leaves the pre-game lobby (`/l bedwars` or your own command) when
+  someone is blacklisted, over your FKDR/sniper limit, or nicked.
+
+Messages show the full tag and reason, fit the 100-character chat limit, and have illegal chat
+characters removed. Solar only types while Minecraft has been focused for a moment, waits for you to
+let go of keys, re-checks focus before every key, and restores your clipboard.
 
 ### Overlay modes & F11
 **Settings → Appearance → When to show the overlay:** *Auto* (lobbies + Bedwars pre-game; hidden in

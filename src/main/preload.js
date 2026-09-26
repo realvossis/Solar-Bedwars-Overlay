@@ -40,6 +40,8 @@ contextBridge.exposeInMainWorld('solarBridge', {
   nickRollerStatus: () => invoke('nickRoller:status'),
   stopNickRoller: () => invoke('nickRoller:stop'),
   checkNickRoller: (name) => invoke('nickRoller:check', name),
+  chatWarnPreview: (party, pub) => invoke('chatWarn:preview', party, pub),
+  safeDodgeCommand: (cmd) => invoke('chatWarn:safeCommand', cmd),
   onNickRoller: (cb) => on('nickRoller:status', cb),
 
   // notifications (the popup window listens; Settings can preview)

@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.2.5 — 2026-09-26
+
+### Added
+- **Chat warnings** (Settings -> Chat & Dodge, Windows):
+  - **Warn your party** (off by default): one party-chat message per flagged player, only in the
+    Bedwars pre-game lobby, only when you're in a party, capped per lobby.
+  - **Public warning (Alt+W)**: types the warning for the next flagged player into chat but does NOT
+    send it - you read it and press Enter (or Esc). Repeated presses cycle through the lobby.
+  - Messages show the full tag and reason, with your own template ({name} {tag} {reason} {sniper}),
+    fitted to Minecraft's 100-character limit (reason shortened with "...", then dropped, then the tag
+    shortened). Characters Minecraft kicks you for are removed.
+- **Auto-dodge** (off by default): leaves the Bedwars pre-game lobby with your command (/l bedwars by
+  default; only plain slash commands accepted) when someone is blacklisted, above an FKDR or sniper
+  score limit, or (optionally) nicked. Once per lobby, never after the countdown's last second, never
+  for you or your party; a popup says who triggered it.
+
+### Safety
+- Solar only types into Minecraft: it must have been the focused window continuously for ~0.6s, focus is
+  re-checked before every key, and it stops the moment you tab out. It waits for you to release movement
+  keys, modifiers and mouse buttons (max 1.5s, else retries later), so it never fights your input.
+  Your chat key is read from Minecraft's options.txt. Your clipboard is only touched for the actual
+  paste and restored before anything else can happen.
+- Verified against a stand-in Minecraft with a working chat box: nothing typed while tabbed out (into
+  the game or the other app), exactly one party message after refocus, Alt+W typed but not sent,
+  auto-dodge sent, no stray keys, clipboard preserved; and with W held, nothing is typed until it's released.
+
+(1.2.4 was replaced by this release; it contains everything from 1.2.4.)
+
 ## 1.2.4 — 2026-09-26
 
 ### Fixed

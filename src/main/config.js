@@ -210,9 +210,20 @@ function defaults() {
       events: {
         nickMatch: { popup: true, sound: true }, mention: { popup: true, sound: true }, dm: { popup: true, sound: true },
         partyInvite: { popup: true, sound: true }, friendRequest: { popup: true, sound: false },
-        threat: { popup: true, sound: true }, nicked: { popup: true, sound: true }, nameWatch: { popup: true, sound: true },
+        threat: { popup: true, sound: true }, nicked: { popup: true, sound: true }, dodge: { popup: true, sound: true }, nameWatch: { popup: true, sound: true },
       },
     },
+
+    // ---- Chat warnings + auto-dodge (Windows; see "chat warnings" in main.js) ----
+    // Party warnings are sent automatically (off by default); the public warning (Alt+W) is only
+    // typed into chat, never sent - you press Enter. Placeholders: {name} {tag} {reason} {sniper}.
+    chatWarn: {
+      partyAuto: false, maxPartyPerLobby: 4, hotkey: true,
+      partyTemplate: '[Solar] {name}: {tag} - {reason}',
+      publicTemplate: 'Heads up: {name} is listed as {tag} - {reason}',
+    },
+    // Leave the Bedwars pre-game lobby when a player crosses a limit (0 = that check off).
+    autoDodge: { enabled: false, onTagged: true, fkdrAbove: 0, sniperAbove: 0, onNicked: false, command: '/l bedwars' },
 
     // ---- Nick roller (Alt+N with Hypixel's random-name book open; see nickRoller.js) ----
     // A rolled name is accepted when it passes every enabled check AND matches at least one rule

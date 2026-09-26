@@ -1,6 +1,6 @@
 'use strict';
 // A tiny Windows-only helper for the nick roller: one long-lived PowerShell process hosting a
-// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly seven things (read-only except click, path and fsfix):
+// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly eight things (read-only except click, path, fsfix and chat):
 //   fg                   -> the foreground window's handle, process name and client-area rect
 //   cap x y w h          -> screenshot of that screen rectangle, written as raw BGRA to the file
 //                           path fixed at startup (big frames don't belong on a pipe)
@@ -10,6 +10,7 @@
 //   cursor               -> current mouse position (to notice you taking the mouse back)
 //   diag a b             -> stacking order + fullscreen state, for the Alt+T visibility check
 //   fsfix 0|1            -> F11 fix: make a foreground, exactly-fullscreen Minecraft window 1px taller
+//   chat key send        -> open Minecraft chat, paste the clipboard, Enter only if send=1 (Minecraft only)
 // All arguments are integers parsed and range-checked on the C# side; nothing from the user or
 // the log is ever interpolated into the script. No npm/native dependencies: the C# is compiled
 // once at startup with the .NET Framework that ships with Windows.
@@ -131,6 +132,48 @@ public static class SolarHelper {
     if (exact && apply == 1) done = SetWindowPos(fg, IntPtr.Zero, mi.mon.L, mi.mon.T, mi.mon.R - mi.mon.L, mi.mon.B - mi.mon.T + 1, 0x214);
     return "ok 1 " + (exact ? 1 : 0) + " " + (done ? 1 : 0);
   }
+  // Chat warnings: open Minecraft's chat with the player's own chat key (LWJGL key code = scan code),
+  // paste the prepared text (the caller put it on the clipboard - no text ever travels through this
+  // command line), and press Enter only when send == 1. Only acts on a foreground Minecraft window,
+  // and first waits for Alt/Ctrl/Shift/Win to be released so a hotkey press can't combine with it.
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
+  [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint type);
+  static void Tap(byte vk, byte scan) { keybd_event(vk, scan, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(25); keybd_event(vk, scan, 2, UIntPtr.Zero); }
+  // Keys that mean "the player is doing something right now": modifiers, mouse buttons, movement,
+  // jump/sneak/sprint. Typing while any of these is held would fight the player's own input.
+  static readonly int[] BusyKeys = { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0x01, 0x02, 0x04, 0x05, 0x06, 0x57, 0x41, 0x53, 0x44, 0x20 };
+  static bool KeysHeld() { foreach (int k in BusyKeys) if ((GetAsyncKeyState(k) & 0x8000) != 0) return true; return false; }
+  static bool IsMinecraft(IntPtr h) {
+    uint pid; GetWindowThreadProcessId(h, out pid); string pn = "";
+    try { pn = Process.GetProcessById((int)pid).ProcessName.ToLowerInvariant(); } catch { }
+    return pn == "javaw" || pn == "java";
+  }
+  public static string Chat(int chatScan, int send) {
+    IntPtr fg = GetForegroundWindow();
+    if (!IsMinecraft(fg)) return "err notmc";
+    // Minecraft must stay the focused window for a moment first: if you just tabbed in or out, or
+    // are busy in another app, nothing is typed.
+    for (int i = 0; i < 6; i++) { System.Threading.Thread.Sleep(100); if (GetForegroundWindow() != fg) return "err notfg"; }
+    // Never fight your keyboard/mouse: wait (max 1.5s) until nothing is held, else try again later.
+    for (int i = 0; i < 75 && KeysHeld(); i++) System.Threading.Thread.Sleep(20);
+    if (KeysHeld()) return "err keysheld";
+    uint vk = MapVirtualKey((uint)chatScan, 1); // MAPVK_VSC_TO_VK
+    if (vk == 0) return "err key";
+    // Focus is re-checked before every single key; if you tab out mid-way it stops right there.
+    if (GetForegroundWindow() != fg) return "err notfg";
+    Tap((byte)vk, (byte)chatScan);
+    System.Threading.Thread.Sleep(180); // let the chat box open
+    if (GetForegroundWindow() != fg) return "err notfg";
+    keybd_event(0x11, 0x1D, 0, UIntPtr.Zero); System.Threading.Thread.Sleep(15);
+    Tap(0x56, 0x2F); System.Threading.Thread.Sleep(15);                  // Ctrl+V
+    keybd_event(0x11, 0x1D, 2, UIntPtr.Zero); System.Threading.Thread.Sleep(60);
+    if (send == 1) {
+      if (GetForegroundWindow() != fg) return "err notfg";
+      Tap(0x0D, 0x1C);                                                     // Enter
+    }
+    return "ok";
+  }
   public static string Cursor() { POINT p; GetCursorPos(out p); return "ok " + p.X + " " + p.Y; }
 }
 '@
@@ -151,6 +194,7 @@ while ($true) {
     elseif ($a[0] -eq 'cursor' -and $n.Count -eq 0) { $out = [SolarHelper]::Cursor() }
     elseif ($a[0] -eq 'cap' -and $n.Count -eq 4 -and (& $coordOk $n) -and $n[2] -gt 0 -and $n[3] -gt 0 -and $n[2] * $n[3] -le 40000000) { $out = [SolarHelper]::Cap($n[0], $n[1], $n[2], $n[3], $capPath) }
     elseif ($a[0] -eq 'click' -and $n.Count -eq 3 -and (& $coordOk $n[0..1]) -and $n[2] -gt 0) { $out = [SolarHelper]::Click($n[0], $n[1], $n[2]) }
+    elseif ($a[0] -eq 'chat' -and $n.Count -eq 2 -and $n[0] -ge 1 -and $n[0] -le 255 -and ($n[1] -eq 0 -or $n[1] -eq 1)) { $out = [SolarHelper]::Chat([int]$n[0], [int]$n[1]) }
     elseif ($a[0] -eq 'fsfix' -and $n.Count -eq 1 -and ($n[0] -eq 0 -or $n[0] -eq 1)) { $out = [SolarHelper]::FsFix([int]$n[0]) }
     elseif ($a[0] -eq 'diag' -and $n.Count -eq 2 -and $n[0] -ge 0 -and $n[1] -ge 0) { $out = [SolarHelper]::Diag($n[0], $n[1]) }
     elseif ($a[0] -eq 'path' -and $n.Count -ge 4 -and $n.Count -le 802 -and ($n.Count % 2) -eq 0 -and $n[0] -gt 0 -and $n[1] -ge 1 -and $n[1] -le 50 -and (& $coordOk $n[2..($n.Count - 1)])) {
@@ -232,6 +276,12 @@ class WinHelper {
     const r = (await this.request(`diag ${String(a || 0).replace(/\D/g, '') || 0} ${String(b || 0).replace(/\D/g, '') || 0}`)).split(' ');
     if (r[0] !== 'ok') return { error: r.join(' ') };
     return { fgZ: +r[1], overlayZ: +r[2], popupZ: +r[3], fgTopmost: r[4] === '1', fgPopupStyle: r[5] === '1', fgCoversMonitor: r[6] === '1', fullscreenState: +r[7], fgProcess: Buffer.from(r[8] || '', 'base64').toString('utf8') };
+  }
+
+  // See Chat above. Returns 'ok' or a reason ('notmc', 'notfg', 'modifiers', 'key').
+  async chat(chatScan, send) {
+    const r = await this.request(`chat ${Math.max(1, Math.min(255, chatScan | 0))} ${send ? 1 : 0}`, 6000);
+    return r === 'ok' ? 'ok' : r.replace(/^err /, '');
   }
 
   // See FsFix above. apply=false only reports.
