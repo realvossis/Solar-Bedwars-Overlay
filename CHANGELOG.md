@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1 — 2026-09-26
+
+### Fixed
+- **Click-through could not be turned off again.** Enabling it made the whole overlay ignore the mouse,
+  including its own toggle, and the setting persisted across restarts. The title bar now stays
+  clickable while click-through is on (the rest of the overlay still passes clicks through to the
+  game), so the toggle is always reachable. Verified with a real-mouse test.
+- The click-through button could show the wrong state after toggling, and Settings didn't update
+  when it was toggled from the overlay.
+
+(1.2.0 was withdrawn because of this bug. 1.2.1 contains everything listed under 1.2.0.)
+
 ## 1.2.0 — 2026-09-26
 
 ### Added

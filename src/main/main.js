@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, dialog, Tray, Menu, nativeImage, shell, session, screen } = require('electron');
 const path = require('path');
 
 // Dev-only: point a `npm run dev` session at a throwaway profile (SOLAR_USER_DATA=some/dir) so
@@ -118,9 +118,26 @@ function applyCapture() {
   if (!overlayWin) return;
   overlayWin.setContentProtection(!!getConfig().hideFromCapture); // WDA_EXCLUDEFROMCAPTURE on Windows
 }
+// Click-through makes the whole window ignore the mouse - which used to include the very button
+// that turns it off, leaving the overlay stuck (and the setting persists across restarts). So while
+// it's on, the cursor is polled and the title bar strip becomes clickable whenever the cursor is
+// over it. Polling instead of Electron's forwarded mouse-moves: those turned out not to arrive at
+// all with this window setup (verified with a real-mouse test).
+const TITLEBAR_H = 38; // DIP: 36px bar + borders
+let ctPoll = null, ctInteractive = false;
 function applyClickThrough() {
   if (!overlayWin) return;
-  overlayWin.setIgnoreMouseEvents(!!getConfig().clickThrough, { forward: true });
+  const on = !!getConfig().clickThrough;
+  ctInteractive = false;
+  overlayWin.setIgnoreMouseEvents(on, { forward: true });
+  if (on && !ctPoll) ctPoll = setInterval(pollClickThrough, 80);
+  if (!on && ctPoll) { clearInterval(ctPoll); ctPoll = null; }
+}
+function pollClickThrough() {
+  if (!overlayWin || overlayWin.isDestroyed() || !getConfig().clickThrough || (nickRoller && nickRoller.running)) return;
+  const p = screen.getCursorScreenPoint(), b = overlayWin.getBounds();
+  const over = overlayWin.isVisible() && p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + TITLEBAR_H;
+  if (over !== ctInteractive) { ctInteractive = over; overlayWin.setIgnoreMouseEvents(!over, { forward: true }); }
 }
 
 // The overlay is frameless and meant to sit as a small always-on-top strip, so an
@@ -453,7 +470,7 @@ function registerIpc() {
   handle('roster:clear', () => { roster.clear(); return true; });
   handle('roster:refresh', () => { roster.refreshAll(); return true; });
 
-  handle('overlay:setClickThrough', (_e, v) => { config.save({ clickThrough: !!v }); applyClickThrough(); return !!v; });
+  handle('overlay:setClickThrough', (_e, v) => { config.save({ clickThrough: !!v }); applyClickThrough(); broadcastConfig(); return !!v; });
   // Act on the window that asked, not whichever happens to be focused - those can differ.
   handle('window:min', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize());
   handle('window:close', (e) => { const w = BrowserWindow.fromWebContents(e.sender); if (w === overlayWin) app.quit(); else w?.close(); });

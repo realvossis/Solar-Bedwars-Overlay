@@ -523,7 +523,9 @@ async function init(){
   $('#btnRefresh').onclick=()=>api.refreshRoster();
   $('#btnMin').onclick=()=>api.minimize();
   $('#btnClose').onclick=()=>api.quit();
-  $('#btnClick').onclick=async ()=>{ await api.setClickThrough(!cfg.clickThrough); cfg.clickThrough=!cfg.clickThrough; $('#btnClick').classList.toggle('on',cfg.clickThrough); };
+  // Decide the new state once: the config broadcast can land while we await, so re-reading
+  // cfg afterwards would flip it back.
+  $('#btnClick').onclick=async ()=>{ const v=!cfg.clickThrough; await api.setClickThrough(v); cfg.clickThrough=v; $('#btnClick').classList.toggle('on',v); };
 
   const roll=$('#rollChip');
   roll.onclick=()=>api.stopNickRoller();
