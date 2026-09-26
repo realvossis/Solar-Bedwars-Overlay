@@ -123,6 +123,17 @@ t('«star» prefix speakers count as chat speakers', () => {
 t('aliases typed with dots/spaces still work ("vossis. voss")', () => {
   assert.strictEqual(only(run(['[VIP] Bob: gg voss'], ['vossis. voss']), 'mention').length, 1);
 });
+t('match lifecycle lines (real Hypixel wording)', () => {
+  const ev = run(['The game starts in 1 second!', '     Protect your bed and destroy the enemy beds.', 'You have been eliminated!']);
+  assert.deepStrictEqual(ev.filter((e) => /^match/.test(e[0])).map((e) => e[0]), ['matchStarting', 'matchStart', 'matchEnd']);
+});
+t('server change carries game mode (game instance) vs none (lobby)', () => {
+  const ev = only(run(['{"server":"mini86C","gametype":"DUELS","mode":"DUELS_SUMO_DUEL","map":"x"}', '{"server":"bedwarslobby5","gametype":"BEDWARS","lobbyname":"bedwarslobby5"}']), 'serverChange');
+  assert.deepStrictEqual(ev.map((e) => [e[1].gametype, e[1].mode]), [['DUELS', 'DUELS_SUMO_DUEL'], ['BEDWARS', null]]);
+});
+t('chat cannot fake a match start', () => {
+  assert.strictEqual(only(run(['[VIP] Troll: Protect your bed and destroy the enemy beds.']), 'matchStart').length, 0);
+});
 t('no mention for your own messages',() => assert.strictEqual(only(run(['[VIP] Me: me me'], ['Me']), 'mention').length, 0));
 
 console.log(`\n${pass} passed, ${fail} failed`);

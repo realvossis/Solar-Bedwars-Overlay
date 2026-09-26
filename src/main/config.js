@@ -141,6 +141,12 @@ function defaults() {
     // see overlay.js) without squeezing the Player name down to a sliver.
     window: { x: 60, y: 60, width: 900, height: 420, opacity: 0.94 },
     alwaysOnTop: true,
+    // When the overlay is shown: 'auto' (lobbies + Bedwars pre-game, hidden in matches and other
+    // games), 'manual' (only via Alt+B), 'always'. See applyOverlayVisibility in main.js.
+    overlayMode: 'auto',
+    // Make Minecraft's F11 window 1px taller so the NVIDIA driver can't take it into an exclusive mode
+    // that hides every other window (see fullscreenTick in main.js).
+    fullscreenFix: true,
     hideFromCapture: true, // setContentProtection -> invisible to OBS/Discord/screenshots
     clickThrough: false,
     lockPosition: false,
@@ -200,6 +206,7 @@ function defaults() {
     // Popups never take focus from the game. Each event can show a popup and/or play a sound.
     notifications: {
       enabled: true, position: 'bottom-right', durationSec: 7, sound: true, volume: 0.6, threatMinSniper: 70, startupSound: true,
+      bedwarsOnly: true, // threat + nicked-player alerts only in Bedwars (not every Duels opponent)
       events: {
         nickMatch: { popup: true, sound: true }, mention: { popup: true, sound: true }, dm: { popup: true, sound: true },
         partyInvite: { popup: true, sound: true }, friendRequest: { popup: true, sound: false },

@@ -28,6 +28,9 @@
 //                         get on a nicked killer's real identity, see hypixel.findByFinalKills()
 //   houseEntered(name)  - teleporting into someone's Housing instance
 //   serverChange()      - sent to a new server / game over
+//   matchStarting()     - "The game starts in 1 second!"
+//   matchStart()        - the Bedwars start banner ("Protect your bed and destroy the enemy beds.")
+//   matchEnd(reason)    - you were eliminated (leaving/game over arrive as serverChange)
 const fs = require('fs');
 const { EventEmitter } = require('events');
 
@@ -199,6 +202,12 @@ class LogWatcher extends EventEmitter {
     m = msg.match(new RegExp('^(?:>>>\\s*)?(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')\\s+joined the lobby!'));
     if (m) { this.emit('lobbyJoin', m[1]); return; }
 
+    // ---- match lifecycle (drives "hide overlay during matches"). Exact Hypixel system lines, verified
+    // against real logs; anchored, so nobody can fake them in chat (chat starts with the sender). ----
+    if (/^The game starts in 1 second!/.test(msg)) { this.emit('matchStarting'); return; }
+    if (/^Protect your bed and destroy the enemy beds\./.test(msg)) { this.emit('matchStart'); return; }
+    if (/^You have been eliminated!/.test(msg)) { this.emit('matchEnd', 'eliminated'); return; }
+
     // ---- quit: "Name has quit!" ----
     m = msg.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') has quit!'));
     if (m) { this.emit('quit', m[1]); return; }
@@ -242,7 +251,10 @@ class LogWatcher extends EventEmitter {
     m = msg.match(/"server"\s*:\s*"([^"]+)"/);
     if (m) {
       const gt = msg.match(/"gametype"\s*:\s*"([^"]+)"/);
-      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null });
+      // "mode" is only present on an actual game instance (e.g. BEDWARS_FOUR_FOUR, DUELS_SUMO_DUEL),
+      // never on a lobby - that's how "in a game" is told apart from "in a lobby".
+      const md = msg.match(/"mode"\s*:\s*"([^"]+)"/);
+      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null, mode: md ? md[1] : null });
       return;
     }
     // The "Bed Wars" banner line some clients were assumed to print never actually showed up in a

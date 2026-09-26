@@ -103,7 +103,41 @@ function createSplash() {
 }
 function finishSplash() {
   if (splashWin && !splashWin.isDestroyed()) splashWin.close();
-  if (overlayWin && !overlayWin.isDestroyed() && !overlayWin.isVisible()) overlayWin.showInactive();
+  splashFinished = true;
+  applyOverlayVisibility();
+}
+
+// ---------------- overlay visibility ----------------
+// overlayMode (Settings -> Appearance):
+//   auto   - shown in lobbies and the BEDWARS pre-game lobby (where you scout players); hidden once a
+//            match starts and in every other game (Duels, SkyWars, ...) from the moment you join.
+//            Alt+B overrides it until the next phase change.
+//   manual - hidden unless you show it with Alt+B (or the tray); your choice sticks.
+//   always - always shown; Alt+B still hides it and that choice sticks.
+// Notifications are separate and keep working in every mode.
+let splashFinished = false, inMatch = false, overlayOverride = null, matchStartTimer = null, lobbyTimer = null;
+let currentGametype = null;
+const overlayMode = () => { const m = getConfig().overlayMode; return m === 'manual' || m === 'always' ? m : 'auto'; };
+function overlayWanted() {
+  if (overlayOverride !== null) return overlayOverride;
+  const mode = overlayMode();
+  if (mode === 'always') return true;
+  if (mode === 'manual') return false;
+  return !inMatch;
+}
+function applyOverlayVisibility() {
+  if (!overlayWin || overlayWin.isDestroyed() || !splashFinished) return;
+  const want = overlayWanted();
+  if (want && !overlayWin.isVisible()) overlayWin.showInactive();
+  else if (!want && overlayWin.isVisible()) overlayWin.hide();
+}
+function setInMatch(v) {
+  clearTimeout(matchStartTimer); matchStartTimer = null;
+  clearTimeout(lobbyTimer); lobbyTimer = null;
+  if (inMatch === v) return;
+  inMatch = v;
+  if (overlayMode() === 'auto') overlayOverride = null; // in auto, an Alt+B choice lasts one phase
+  applyOverlayVisibility();
 }
 
 // Each of these touches window state the OS compositor (DWM) cares about - topmost z-order and
@@ -236,7 +270,23 @@ function wireWatcher() {
     pendingHouseOwner = owner; pendingHouseOwnerTs = Date.now();
     roster.addNames([owner], 'house');
   });
+  // Match phases -> overlay auto-hide.
+  watcher.on('matchStarting', () => { clearTimeout(matchStartTimer); matchStartTimer = setTimeout(() => setInMatch(true), 1500); });
+  watcher.on('matchStart', () => setInMatch(true));
+  watcher.on('matchEnd', () => setInMatch(false));
   watcher.on('serverChange', (info) => {
+    if (info && info.server !== undefined) {
+      // Exact answer from the client's status blob: a "mode" means a game instance. Bedwars games
+      // start with a pre-game lobby worth scouting (hidden later by the start banner); any other
+      // game (Duels, SkyWars, ...) counts as "in a match" right away. No mode = a lobby.
+      currentGametype = info.gametype || null;
+      setInMatch(!!info.mode && info.gametype !== 'BEDWARS');
+    } else {
+      // Plain-text fallback ("Sending you to ...") can't say where to - wait briefly for the exact
+      // blob instead of flashing the overlay up on the way into a Duels game.
+      clearTimeout(lobbyTimer);
+      lobbyTimer = setTimeout(() => setInMatch(false), 2500);
+    }
     // undefined means "changed servers, but we don't actually know which one" (the plain-text
     // fallback patterns can't tell) - leave currentServer alone rather than guessing. Any real
     // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
@@ -338,7 +388,13 @@ async function playerSummary(name) {
 // A blacklisted or high-sniper-score player just finished loading into your lobby. Once per player
 // per lobby; never for you or your party.
 const threatsAlerted = new Set();
+// Threat/nick alerts are about scouting a Bedwars lobby; elsewhere (e.g. every Duels opponent) they'd
+// just be noise, so by default they're Bedwars-only. Unknown game type = allowed.
+function lobbyAlertsAllowed() {
+  return (getConfig().notifications || {}).bedwarsOnly === false || !currentGametype || currentGametype === 'BEDWARS';
+}
 function checkThreat(row) {
+  if (!lobbyAlertsAllowed()) return;
   if (row.source === 'SELF' || row.source === 'PARTY' || row.left || threatsAlerted.has(row.key)) return;
   const min = Number((getConfig().notifications || {}).threatMinSniper) || 70;
   const u = row.urchin || {};
@@ -356,12 +412,43 @@ function checkThreat(row) {
 // own nicks there so you aren't alerted about yourself).
 const nicksAlerted = new Set();
 function checkNick(row) {
+  if (!lobbyAlertsAllowed()) return;
   if (!row.nicked || row.source === 'SELF' || row.source === 'PARTY' || row.left || nicksAlerted.has(row.key)) return;
   const cfg = getConfig();
   const mine = [cfg.selfName, ...(cfg.reactNames || [])].map((n) => String(n || '').toLowerCase());
   if (mine.includes(row.key)) return;
   nicksAlerted.add(row.key);
   notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
+}
+
+// ---------------- F11 fullscreen fix ----------------
+// NVIDIA's OpenGL driver shows a window that exactly fills the monitor (Minecraft in F11) in an
+// exclusive mode where Windows draws nothing on top - Solar's overlay and popups included. Once a
+// second, if Minecraft is the foreground window and exactly fullscreen, it's made 1px taller: it
+// still covers the whole screen, but Windows composes it normally again. Never touches focus. If the
+// game keeps undoing it (>=5 times a minute), Solar stops fighting it.
+let fsHelper = null, fsTimer = null, fsBusy = false, fsResizes = [], fsAnnounced = false;
+function applyFullscreenFix() {
+  const on = process.platform === 'win32' && getConfig().fullscreenFix !== false;
+  if (on && !fsTimer) { fsHelper = new WinHelper(path.join(app.getPath('userData'), 'fsfix.frame')); fsTimer = setInterval(fullscreenTick, 1000); }
+  if (!on && fsTimer) { clearInterval(fsTimer); fsTimer = null; if (fsHelper) fsHelper.stop(); fsHelper = null; }
+}
+async function fullscreenTick() {
+  if (fsBusy || !fsHelper) return;
+  fsBusy = true;
+  try {
+    await fsHelper.start();
+    const now = Date.now();
+    fsResizes = fsResizes.filter((t) => now - t < 60000);
+    const r = await fsHelper.fullscreenFix(fsResizes.length < 5);
+    if (r.resized) {
+      fsResizes.push(now);
+      if (!fsAnnounced) { fsAnnounced = true; toast('F11 fullscreen detected - adjusted so Solar can show over your game'); }
+    }
+  } catch (e) {
+    console.warn('fullscreen fix unavailable:', e.message);
+    clearInterval(fsTimer); fsTimer = null;
+  } finally { fsBusy = false; }
 }
 
 // ---------------- in-game visibility check (Alt+T) ----------------
@@ -630,6 +717,8 @@ function afterConfigChange(patch) {
   if (has('logPath') || has('logEnabled') || has('selfName') || has('reactNames')) startWatcher();
   if (has('selfName') || has('hideSelf')) applySelf();
   if (has('refreshSeconds')) applyRefreshTimer();
+  if (has('overlayMode')) { overlayOverride = null; applyOverlayVisibility(); }
+  if (has('fullscreenFix')) applyFullscreenFix();
   if (has('nameWatch')) applyNameWatch();
 }
 
@@ -656,7 +745,11 @@ function buildTray() {
     tray.on('double-click', toggleOverlay);
   } catch (_) {}
 }
-function toggleOverlay() { if (!overlayWin) { createOverlay(); overlayWin.show(); return; } overlayWin.isVisible() ? overlayWin.hide() : overlayWin.showInactive(); }
+function toggleOverlay() {
+  if (!overlayWin) { createOverlay(); overlayWin.showInactive(); return; }
+  overlayOverride = !overlayWin.isVisible();
+  applyOverlayVisibility();
+}
 
 function registerShortcuts() {
   const bind = (accel, fn) => { if (!globalShortcut.register(accel, fn)) console.warn('shortcut unavailable (in use by another app):', accel); };
@@ -712,6 +805,7 @@ if (!app.requestSingleInstanceLock()) {
     wireWatcher();
     notifier = new Notifier({ getConfig, webPreferences: SECURE_PREFS, anchorWindow: () => overlayWin });
     setupNickRoller();
+    applyFullscreenFix();
     registerIpc();
     createSplash();
     createOverlay(); // stays hidden (show:false) until the splash reports done, see finishSplash()
@@ -738,5 +832,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); });
 }

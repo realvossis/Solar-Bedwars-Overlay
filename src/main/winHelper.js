@@ -1,6 +1,6 @@
 'use strict';
 // A tiny Windows-only helper for the nick roller: one long-lived PowerShell process hosting a
-// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly six things (all read-only except click/path):
+// compiled C# class, driven over stdin/stdout one line at a time. It can do exactly seven things (read-only except click, path and fsfix):
 //   fg                   -> the foreground window's handle, process name and client-area rect
 //   cap x y w h          -> screenshot of that screen rectangle, written as raw BGRA to the file
 //                           path fixed at startup (big frames don't belong on a pipe)
@@ -9,6 +9,7 @@
 //   path hwnd dt x y ... -> glide the mouse through up to 400 points, dt ms apart (same focus rule)
 //   cursor               -> current mouse position (to notice you taking the mouse back)
 //   diag a b             -> stacking order + fullscreen state, for the Alt+T visibility check
+//   fsfix 0|1            -> F11 fix: make a foreground, exactly-fullscreen Minecraft window 1px taller
 // All arguments are integers parsed and range-checked on the C# side; nothing from the user or
 // the log is ever interpolated into the script. No npm/native dependencies: the C# is compiled
 // once at startup with the .NET Framework that ships with Windows.
@@ -109,6 +110,27 @@ public static class SolarHelper {
     try { pn = Process.GetProcessById((int)pid).ProcessName; } catch { }
     return "ok " + pf + " " + pa + " " + pb + " " + ((ex & 0x8) != 0 ? 1 : 0) + " " + ((st & unchecked((int)0x80000000)) != 0 ? 1 : 0) + " " + (covers ? 1 : 0) + " " + q + " " + Convert.ToBase64String(Encoding.UTF8.GetBytes(pn));
   }
+  // F11 fix. The NVIDIA OpenGL driver puts a window that EXACTLY covers the monitor into an exclusive
+  // presentation mode where Windows draws nothing else on top - no overlay, no popups. Making the
+  // game window 1px taller keeps it covering the whole screen (taskbar still hidden, looks identical)
+  // but the driver no longer goes exclusive. Only ever touches a foreground Minecraft (java/javaw)
+  // window, and never activates it or changes the stacking order.
+  // Returns: "ok <isMinecraftForeground> <exactFullscreen> <resized>".
+  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int hh, uint f);
+  public static string FsFix(int apply) {
+    IntPtr fg = GetForegroundWindow();
+    uint pid; GetWindowThreadProcessId(fg, out pid); string pn = "";
+    try { pn = Process.GetProcessById((int)pid).ProcessName.ToLowerInvariant(); } catch { }
+    bool mc = pn == "javaw" || pn == "java";
+    if (!mc) return "ok 0 0 0";
+    RECT r; GetWindowRect(fg, out r);
+    MONINFO mi = new MONINFO(); mi.cb = Marshal.SizeOf(typeof(MONINFO)); GetMonitorInfo(MonitorFromWindow(fg, 2), ref mi);
+    bool exact = r.L == mi.mon.L && r.T == mi.mon.T && r.R == mi.mon.R && r.B == mi.mon.B;
+    bool done = false;
+    // SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER
+    if (exact && apply == 1) done = SetWindowPos(fg, IntPtr.Zero, mi.mon.L, mi.mon.T, mi.mon.R - mi.mon.L, mi.mon.B - mi.mon.T + 1, 0x214);
+    return "ok 1 " + (exact ? 1 : 0) + " " + (done ? 1 : 0);
+  }
   public static string Cursor() { POINT p; GetCursorPos(out p); return "ok " + p.X + " " + p.Y; }
 }
 '@
@@ -129,6 +151,7 @@ while ($true) {
     elseif ($a[0] -eq 'cursor' -and $n.Count -eq 0) { $out = [SolarHelper]::Cursor() }
     elseif ($a[0] -eq 'cap' -and $n.Count -eq 4 -and (& $coordOk $n) -and $n[2] -gt 0 -and $n[3] -gt 0 -and $n[2] * $n[3] -le 40000000) { $out = [SolarHelper]::Cap($n[0], $n[1], $n[2], $n[3], $capPath) }
     elseif ($a[0] -eq 'click' -and $n.Count -eq 3 -and (& $coordOk $n[0..1]) -and $n[2] -gt 0) { $out = [SolarHelper]::Click($n[0], $n[1], $n[2]) }
+    elseif ($a[0] -eq 'fsfix' -and $n.Count -eq 1 -and ($n[0] -eq 0 -or $n[0] -eq 1)) { $out = [SolarHelper]::FsFix([int]$n[0]) }
     elseif ($a[0] -eq 'diag' -and $n.Count -eq 2 -and $n[0] -ge 0 -and $n[1] -ge 0) { $out = [SolarHelper]::Diag($n[0], $n[1]) }
     elseif ($a[0] -eq 'path' -and $n.Count -ge 4 -and $n.Count -le 802 -and ($n.Count % 2) -eq 0 -and $n[0] -gt 0 -and $n[1] -ge 1 -and $n[1] -le 50 -and (& $coordOk $n[2..($n.Count - 1)])) {
       $out = [SolarHelper]::Path($n[0], [int]$n[1], [long[]]$n[2..($n.Count - 1)])
@@ -209,6 +232,13 @@ class WinHelper {
     const r = (await this.request(`diag ${String(a || 0).replace(/\D/g, '') || 0} ${String(b || 0).replace(/\D/g, '') || 0}`)).split(' ');
     if (r[0] !== 'ok') return { error: r.join(' ') };
     return { fgZ: +r[1], overlayZ: +r[2], popupZ: +r[3], fgTopmost: r[4] === '1', fgPopupStyle: r[5] === '1', fgCoversMonitor: r[6] === '1', fullscreenState: +r[7], fgProcess: Buffer.from(r[8] || '', 'base64').toString('utf8') };
+  }
+
+  // See FsFix above. apply=false only reports.
+  async fullscreenFix(apply) {
+    const r = (await this.request(`fsfix ${apply ? 1 : 0}`)).split(' ');
+    if (r[0] !== 'ok') throw new Error('fsfix failed: ' + r.join(' '));
+    return { minecraftForeground: r[1] === '1', exactFullscreen: r[2] === '1', resized: r[3] === '1' };
   }
 
   async cursor() { const r = (await this.request('cursor')).split(' '); return { x: +r[1], y: +r[2] }; }

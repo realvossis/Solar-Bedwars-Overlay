@@ -31,7 +31,7 @@ system tray.
 
 | Key | Action |
 |-----|--------|
-| `Alt+B` | Show / hide the overlay |
+| `Alt+B` | Show / hide the overlay (works in every overlay mode) |
 | `Alt+X` | Toggle click-through (mouse passes to the game) |
 | `Alt+C` | Clear the player list |
 | `Alt+S` | Open settings |
@@ -178,6 +178,15 @@ is meant to work out of the box — but each is an independent toggle if you wan
 `Settings → Appearance → Hide from screen capture` uses Electron's `setContentProtection`
 (→ `WDA_EXCLUDEFROMCAPTURE` on Windows), so the overlay is invisible to OBS, Discord screen-share,
 and screenshots while still visible to you. On by default.
+
+### Overlay modes & F11
+**Settings → Appearance → When to show the overlay:** *Auto* (lobbies + Bedwars pre-game; hidden in
+matches and other games like Duels), *Manual* (Alt+B only) or *Always on*.
+
+**F11 fullscreen fix** (on by default): NVIDIA's OpenGL driver shows a window that exactly fills the
+monitor in an exclusive mode that hides every other window. Solar makes Minecraft's F11 window 1px
+taller, which keeps it fullscreen-looking but lets Windows draw the overlay and popups on top. It never
+takes focus. The cost is at most about one frame of display latency.
 
 ### Game performance — no OpenGL errors
 The overlay renders on the CPU by default (**Settings → Performance → GPU acceleration**, off).

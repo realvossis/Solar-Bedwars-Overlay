@@ -233,6 +233,7 @@ function panelNotifications(p) {
   p.appendChild(fieldRow('Volume', 'Also used for the startup sound.', range('notifications.volume', 0, 1, 0.05, 1)));
   p.appendChild(fieldRow('Startup sound', 'Soundtrack for the launch animation.', toggle('notifications.startupSound')));
   p.appendChild(fieldRow('Threat alert: sniper score from', 'Also alerts for anyone blacklisted, regardless of score.', number('notifications.threatMinSniper', 20, 100, 5)));
+  p.appendChild(fieldRow('Threat & nick alerts only in Bedwars', 'Off = also in Duels, SkyWars etc. (where nearly every opponent would trigger one).', toggle('notifications.bedwarsOnly')));
   const test = el('button', 'ghost'); test.textContent = 'Send test notifications';
   test.onclick = () => api.previewNotification();
   p.appendChild(fieldRow('Preview', 'Shows sample popups with sound.', test));
@@ -515,6 +516,10 @@ function panelAppearance(p) {
   p.appendChild(fieldRow('Row height (px)', '', number('rowHeight', 16, 40, 1)));
   p.appendChild(header('Window', ''));
   p.appendChild(fieldRow('Always on top', '', toggle('alwaysOnTop')));
+  p.appendChild(fieldRow('When to show the overlay', 'Auto: in lobbies and the Bedwars pre-game lobby (to scout players), hidden once the match starts and in other games like Duels. Manual: only when you press Alt+B. Always: always visible. Alt+B toggles it in every mode; notifications work in all of them.', select('overlayMode', [
+    { v: 'auto', l: 'Auto (lobbies + pre-game)' }, { v: 'manual', l: 'Manual (Alt+B only)' }, { v: 'always', l: 'Always on' },
+  ])));
+  p.appendChild(fieldRow('F11 fullscreen fix', 'Some graphics drivers (e.g. NVIDIA) show Minecraft in F11 in a mode where nothing can appear on top. Solar makes the game window 1px taller so the overlay and popups stay visible. Looks the same; never takes focus.', toggle('fullscreenFix')));
   p.appendChild(fieldRow('Hide from screen capture', 'Invisible to OBS / Discord share / screenshots (Windows).', toggle('hideFromCapture')));
   p.appendChild(fieldRow('Click-through', 'Mouse passes through to the game. Toggle with Alt+X.', toggle('clickThrough')));
 

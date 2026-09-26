@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.2.4 — 2026-09-26
+
+### Fixed
+- **Overlay and notifications invisible in F11 fullscreen (NVIDIA).** The NVIDIA OpenGL driver shows a
+  window that exactly fills the monitor in an exclusive mode where Windows draws nothing on top. Solar
+  now makes Minecraft's F11 window 1px taller: it still covers the whole screen (taskbar hidden,
+  looks identical) but Windows composes it normally, so the overlay and popups show. Never takes
+  focus; stops if the game keeps undoing it. Confirmed on a real Lunar F11 session (Windows'
+  fullscreen state went from exclusive to normal). Toggle: Settings -> Appearance -> F11 fullscreen fix.
+  Cost: FPS essentially unchanged; up to ~1 frame of extra display latency, as with any borderless game.
+- **Popups at every Duels start.** Threat and nicked-player alerts are now Bedwars-only by default
+  (setting to change), instead of firing for nearly every Duels opponent.
+
+### Added
+- **"When to show the overlay"** (Settings -> Appearance): **Auto** - in lobbies and the Bedwars
+  pre-game lobby, hidden once a match starts and in other games like Duels from the moment you join;
+  **Manual** - only via Alt+B; **Always on**. Alt+B toggles it in every mode; notifications work in all.
+
+(1.2.3 was replaced by this release; it contains everything from 1.2.3.)
+
 ## 1.2.3 — 2026-09-26
 
 ### Fixed
