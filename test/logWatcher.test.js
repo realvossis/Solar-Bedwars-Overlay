@@ -127,9 +127,14 @@ t('match lifecycle lines (real Hypixel wording)', () => {
   const ev = run(['The game starts in 1 second!', '     Protect your bed and destroy the enemy beds.', 'You have been eliminated!']);
   assert.deepStrictEqual(ev.filter((e) => /^match/.test(e[0])).map((e) => e[0]), ['matchStarting', 'matchStart', 'matchEnd']);
 });
+t('chat cannot fake a server switch (status blob must be the whole message)', () => {
+  const ev = only(run(['[Client thread/INFO]: [CHAT] [MVP+] Troll: {"server":"mini1A","gametype":"BEDWARS","mode":"BEDWARS_EIGHT_ONE","map":"Fake"}']), 'serverChange');
+  assert.strictEqual(ev.length, 0);
+});
 t('server change carries game mode (game instance) vs none (lobby)', () => {
   const ev = only(run(['{"server":"mini86C","gametype":"DUELS","mode":"DUELS_SUMO_DUEL","map":"x"}', '{"server":"bedwarslobby5","gametype":"BEDWARS","lobbyname":"bedwarslobby5"}']), 'serverChange');
   assert.deepStrictEqual(ev.map((e) => [e[1].gametype, e[1].mode]), [['DUELS', 'DUELS_SUMO_DUEL'], ['BEDWARS', null]]);
+  assert.deepStrictEqual(ev.map((e) => e[1].map), ['x', null]);
 });
 t('chat cannot fake a match start', () => {
   assert.strictEqual(only(run(['[VIP] Troll: Protect your bed and destroy the enemy beds.']), 'matchStart').length, 0);

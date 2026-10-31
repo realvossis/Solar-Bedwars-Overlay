@@ -155,6 +155,7 @@ const TABS = {
   'Name Watch': panelNameWatch,
   'Nick Roller': panelNickRoller,
   'Chat & Dodge': panelChatDodge,
+  'Discord Decoy': panelDecoy,
   'API Keys': panelApi,
   Connections: panelConnections,
   Appearance: panelAppearance,
@@ -295,6 +296,47 @@ function panelChatDodge(p) {
     cmdOut.innerHTML = safe === cmd.value.trim() ? '<span class="ok">✓</span>' : `<span class="bad">will use ${esc(safe)}</span>`;
   });
   p.appendChild(fieldRow('Leave command', 'A plain slash command, e.g. /l bedwars or /play bedwars_eight_one. In a party, only the leader leaving takes everyone along.', cmdRow));
+}
+
+function panelDecoy(p) {
+  p.appendChild(header('Discord Decoy', 'Shows a fake Lunar Client status on your Discord profile, with the real Lunar app, icons and wording, but only ever with Bed Wars games you are NOT in. A sniper reading your status queues into the wrong game right when you queue.'));
+  const warn = el('div', 'note warn'); warn.style.display = 'none';
+  const wi = el('span', 'ic'); wi.innerHTML = SolarIcons.alert;
+  const wt = el('div'); wt.textContent = 'Lunar Client\'s own Discord Rich Presence is ON. It would show your real game next to the decoy. Turn it off in the Lunar launcher: Settings > Discord Rich Presence.';
+  warn.appendChild(wi); warn.appendChild(wt); p.appendChild(warn);
+
+  p.appendChild(header('Decoy presence', 'Joining a Bed Wars game swaps in a new fake game at that exact moment. In lobbies and other games it shows Lunar\'s plain "Playing Hypixel". Cleared while Minecraft isn\'t running.'));
+  p.appendChild(fieldRow('Enable decoy', 'Off by default. Needs the Discord desktop app running, with activity status on.', toggle('decoyPresence.enabled')));
+  p.appendChild(fieldRow('Fake game', 'A different mode is safer: someone who queues your real mode at the same moment as you could still land in your lobby.', select('decoyPresence.style', [
+    { v: 'other', l: 'Different mode and map' }, { v: 'mirror', l: 'Your mode, different map' },
+  ])));
+
+  p.appendChild(header('What Discord shows', 'Live preview, refreshed every few seconds.'));
+  const card = el('div', 'rpc');
+  card.innerHTML = '<div class="rpc-h">Playing</div><div class="rpc-b"><div class="rpc-art"><div class="rpc-lg">H</div><div class="rpc-sm"></div></div>' +
+    '<div class="rpc-t"><div class="rpc-n">Lunar Client</div><div class="rpc-d"></div><div class="rpc-s"></div><div class="rpc-e"><svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="M4.5 4h7a3.5 3.5 0 0 1 3.4 4.3l-.8 3.4a1.6 1.6 0 0 1-2.8.6L9.6 10.5H6.4l-1.7 1.8a1.6 1.6 0 0 1-2.8-.6l-.8-3.4A3.5 3.5 0 0 1 4.5 4zm.3 2v1.1H3.7v1h1.1v1.1h1V8.1h1.1v-1H5.8V6zm6.2.4a.7.7 0 1 0 0 1.4.7.7 0 0 0 0-1.4zm-1.3 1.4a.7.7 0 1 0 0 1.4.7.7 0 0 0 0-1.4z"/></svg><span></span></div></div></div>';
+  const status = el('div', 'dim'); status.style.cssText = 'font-size:11.5px;margin:8px 0 6px';
+  p.appendChild(card); p.appendChild(status);
+  const q = (s) => card.querySelector(s);
+  const clock = (ms) => { const t = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`; };
+  let last = null;
+  const paint = () => {
+    const r = last || {};
+    warn.style.display = r.lunarRpcOn ? '' : 'none';
+    const shown = r.enabled && r.discord && r.details;
+    card.classList.toggle('off', !shown);
+    q('.rpc-d').textContent = r.details || 'Playing Bed Wars on Hypixel';
+    q('.rpc-s').textContent = r.state || '4v4v4v4 on Shipwreck';
+    q('.rpc-e').style.visibility = r.startedAt ? '' : 'hidden';
+    q('.rpc-e span').textContent = r.startedAt ? clock(Date.now() - r.startedAt) : '';
+    status.innerHTML = !r.enabled ? 'Decoy is off - example of what it shows.'
+      : !r.discord ? '<span class="bad">Discord not found</span> - open the Discord desktop app; Solar retries every 15s.'
+      : !r.gameRunning ? '<span class="ok">Connected to Discord.</span> Nothing shown until Minecraft is running.'
+      : '<span class="ok">Live on your Discord profile.</span>';
+  };
+  const refresh = async () => { try { last = await api.decoyStatus(); } catch (_) {} paint(); };
+  refresh();
+  const iv = setInterval(() => { if (!card.isConnected) { clearInterval(iv); return; } refresh(); }, 3000);
 }
 
 function panelNameWatch(p) {
@@ -834,7 +876,7 @@ function groupSections(p) {
 
 // ---------- shell ----------
 const TAB_ICONS = {
-  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice', 'Chat & Dodge': 'at',
+  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice', 'Chat & Dodge': 'at', 'Discord Decoy': 'mask',
   'API Keys': 'key', Connections: 'link', Appearance: 'palette', Columns: 'columns', 'Sniper Score': 'target', Performance: 'gauge', About: 'info',
 };
 let active = 'General';

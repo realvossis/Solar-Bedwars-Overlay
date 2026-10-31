@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.2.9 — 2026-10-31
+
+### Added
+- **Discord decoy.** A fake Lunar Client Rich Presence that only shows Bed Wars games you're NOT in, so
+  a sniper who reads your Discord status queues into the wrong game. It uses Lunar's real Discord app,
+  images and text format (read from the Lunar launcher and checked against Discord's API), e.g.
+  *Playing Bed Wars on Hypixel / 4v4v4v4 on Lectus*, with the timer counting from game launch. When you
+  join a Bedwars game it switches to a new fake game at that moment: a different mode by default (or
+  your mode, in the setting) and never your map. Lobbies show Lunar's plain *Playing Hypixel*; the
+  status is cleared while Minecraft isn't running and when Solar closes. Settings -> Discord Decoy (off
+  by default) has a live preview and warns you if Lunar's own Rich Presence is on, since that would
+  show your real game. Talks only to the local Discord app; no new dependencies.
+
 ## 1.2.8 — 2026-09-26
 
 ### Added

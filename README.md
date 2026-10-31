@@ -192,6 +192,15 @@ Messages show the full tag and reason, fit the 100-character chat limit, and hav
 characters removed. Solar only types while Minecraft has been focused for a moment, waits for you to
 let go of keys, re-checks focus before every key, and restores your clipboard.
 
+### Discord decoy (Settings → Discord Decoy)
+Off by default. Shows a fake **Lunar Client** status on your Discord profile, using the real Lunar
+Discord app, icons and wording (e.g. *Playing Bed Wars on Hypixel · 4v4v4v4 on Lectus*), but only ever
+with Bed Wars games you are **not** in. When you join a Bedwars game, the decoy swaps to a new fake game
+at that same moment, in a different mode (or, if you choose, your mode) and never on your map. A sniper
+reading your status queues into the wrong game. Lobbies show Lunar's plain *Playing Hypixel*, and the
+status clears when Minecraft closes. Keep Lunar's own Discord Rich Presence **off** (Settings warns you
+if it's on); otherwise it shows your real game next to the decoy.
+
 ### Overlay modes & F11
 **Settings → Appearance → When to show the overlay:** *Auto* (lobbies + Bedwars pre-game; hidden in
 matches and other games like Duels), *Manual* (Alt+B only) or *Always on*.

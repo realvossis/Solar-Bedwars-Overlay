@@ -248,13 +248,16 @@ class LogWatcher extends EventEmitter {
     // while "mini*" is the real, small match instance (confirmed real "The game starts in 10
     // seconds!" countdown and genuine teammate/opponent chat right after). main.js uses the raw
     // server code, not just the gametype, so it can tell those two apart.
-    m = msg.match(/"server"\s*:\s*"([^"]+)"/);
+    // Anchored: the real blob is the whole message, while anything a player types follows their
+    // name, so chat can't fake a server switch (or feed a made-up mode/map in).
+    m = msg.match(/^\{\s*"server"\s*:\s*"([^"]+)"/);
     if (m) {
       const gt = msg.match(/"gametype"\s*:\s*"([^"]+)"/);
       // "mode" is only present on an actual game instance (e.g. BEDWARS_FOUR_FOUR, DUELS_SUMO_DUEL),
       // never on a lobby - that's how "in a game" is told apart from "in a lobby".
       const md = msg.match(/"mode"\s*:\s*"([^"]+)"/);
-      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null, mode: md ? md[1] : null });
+      const mp = msg.match(/"map"\s*:\s*"([^"]+)"/);
+      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null, mode: md ? md[1] : null, map: mp ? mp[1] : null });
       return;
     }
     // The "Bed Wars" banner line some clients were assumed to print never actually showed up in a

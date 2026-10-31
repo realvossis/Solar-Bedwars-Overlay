@@ -226,6 +226,11 @@ function defaults() {
     // Leave the Bedwars pre-game lobby when a player crosses a limit (0 = that check off).
     autoDodge: { enabled: false, onTagged: true, fkdrAbove: 0, sniperAbove: 0, onNicked: false, command: '/l bedwars' },
 
+    // ---- Discord decoy (see decoyPresence.js) ----
+    // A fake Lunar Client presence that only ever shows Bed Wars games you're NOT in. style:
+    // 'other' = a different mode and map, 'mirror' = your mode on a different map.
+    decoyPresence: { enabled: false, style: 'other' },
+
     // ---- Nick roller (Alt+N with Hypixel's random-name book open; see nickRoller.js) ----
     // A rolled name is accepted when it passes every enabled check AND matches at least one rule
     // (if any rules are set). jarPath optionally points at a Minecraft 1.8.9 jar for the font.

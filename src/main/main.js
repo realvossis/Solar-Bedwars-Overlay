@@ -21,6 +21,8 @@ const { WinHelper } = require('./winHelper');
 const { loadFont } = require('./bookReader');
 const { readEntry } = require('./zipReader');
 const png = require('./png');
+const { DiscordRpc } = require('./discordRpc');
+const decoy = require('./decoyPresence');
 
 // ---------------- rendering pipeline ----------------
 // The overlay is a transparent, topmost window sitting directly over Minecraft's OpenGL surface.
@@ -302,6 +304,7 @@ function wireWatcher() {
     // fallback patterns can't tell) - leave currentServer alone rather than guessing. Any real
     // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
     if (info && info.server !== undefined) currentServer = info.server;
+    decoyOnServer(info);
     threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
     partyWarned.clear(); partyWarnQueue.length = 0; publicWarnIndex = 0; pendingDodge = null; dodgedThisLobby = false;
     pendingSummary = null; summaryDoneThisMatch = false;
@@ -621,6 +624,78 @@ async function fullscreenTick() {
   } finally { fsBusy = false; }
 }
 
+// ---------------- Discord decoy (see decoyPresence.js) ----------------
+// A fake Lunar Client presence: shown only while Minecraft runs, it never names your real game.
+// Joining a Bedwars game swaps in a new fake game at that same moment (so the timing looks
+// genuine); lobbies and other games show Lunar's plain "Playing Hypixel" shape.
+let rpc = null, decoyTimer = null, decoyBusy = false, decoyGen = 0;
+// pid = the Minecraft process (picked out of all java processes, see decoy.findGame); javaKey =
+// the java PID set it was found in, so the slower lookup only reruns when that set changes.
+const decoyState = { running: false, pid: null, javaKey: null, startedAt: null, fake: null, last: null, server: null };
+const decoyCfg = () => getConfig().decoyPresence || {};
+const resetDecoyGame = () => Object.assign(decoyState, { running: false, pid: null, javaKey: null, startedAt: null, fake: null, server: null });
+function applyDecoy() {
+  const on = decoyCfg().enabled === true;
+  if (on && !rpc) {
+    decoyGen++; decoyBusy = false;
+    rpc = new DiscordRpc(decoy.LUNAR_CLIENT_ID);
+    rpc.on('error', (e) => console.warn('discord decoy:', e.message));
+    rpc.start();
+    decoyTimer = setInterval(decoyTick, 15000);
+    decoyTick();
+  }
+  if (!on && rpc) {
+    decoyGen++; // a tick still awaiting a process lookup must not write into the reset state
+    clearInterval(decoyTimer); decoyTimer = null;
+    rpc.stop(); rpc = null;
+    resetDecoyGame();
+  }
+}
+async function decoyTick() {
+  if (decoyBusy || !rpc) return;
+  const gen = decoyGen;
+  decoyBusy = true;
+  try {
+    const pids = await decoy.javaPids();
+    if (gen !== decoyGen) return;
+    const key = pids.slice().sort((a, b) => a - b).join(',');
+    if (!pids.length) resetDecoyGame();
+    else if (key !== decoyState.javaKey) {
+      const game = await decoy.findGame();
+      if (gen !== decoyGen) return;
+      if (!game) resetDecoyGame();
+      else if (game.pid !== decoyState.pid) {
+        // a different game process (closed and relaunched between polls) is a new session; the
+        // very first detection keeps a fake game decoyOnServer may have just picked for it
+        const relaunch = decoyState.pid !== null;
+        Object.assign(decoyState, { running: true, pid: game.pid, startedAt: game.startedAt || Date.now() });
+        if (relaunch) Object.assign(decoyState, { fake: null, server: null });
+      }
+      decoyState.javaKey = key;
+    }
+    pushDecoy();
+  } finally { if (gen === decoyGen) decoyBusy = false; }
+}
+function decoyOnServer(info) {
+  if (!rpc || !info || info.server === undefined) return;
+  if (info.gametype === 'BEDWARS' && info.mode) {
+    // the same game instance reporting again keeps its fake game; a new one gets a new fake
+    if (info.server !== decoyState.server || !decoyState.fake) {
+      decoyState.fake = decoy.pickDecoy({ realMode: info.mode, realMap: info.map, style: decoyCfg().style, last: decoyState.last });
+      decoyState.last = decoyState.fake;
+    }
+  } else decoyState.fake = null;
+  decoyState.server = info.server;
+  // a server switch in the log means the game is up - look now instead of waiting for the poll
+  if (!decoyState.running) { decoyState.javaKey = null; decoyTick(); }
+  else pushDecoy();
+}
+function decoyActivity() {
+  if (!decoyState.running) return null;
+  return decoy.activity({ fake: decoyState.fake, startedAt: decoyState.startedAt, version: decoy.versionLabel(getConfig().logPath) });
+}
+function pushDecoy() { if (rpc) rpc.setActivity(decoyActivity()); }
+
 // ---------------- in-game visibility check (Alt+T) ----------------
 // Press it while in your game: shows a test popup, then samples the real window stacking order and
 // the game window's fullscreen state for ~2.5s and appends the result to diagnostics.log in the
@@ -868,6 +943,11 @@ function registerIpc() {
     return { party: chatWarn.compose(cleanText(party, 300), sample, { party: true }), public: chatWarn.compose(cleanText(pub, 300), sample), chatKey: chatKeyScan() };
   });
 
+  handle('decoy:status', () => {
+    const a = decoyActivity();
+    return { enabled: !!rpc, discord: !!(rpc && rpc.ready), gameRunning: decoyState.running, lunarRpcOn: decoy.lunarRpcEnabled(), details: a && a.details, state: a && a.state, startedAt: decoyState.startedAt };
+  });
+
   handle('link:open', (_e, url) => openExternalSafe(url));
   handle('log:getStatus', () => lastLogStatus);
 }
@@ -898,6 +978,7 @@ function afterConfigChange(patch) {
   if (has('fullscreenFix')) applyFullscreenFix();
   if (has('chatWarn')) applyChatWarnHotkey();
   if (has('nameWatch')) applyNameWatch();
+  if (has('decoyPresence')) applyDecoy();
 }
 
 // ---------------- tray + shortcuts ----------------
@@ -985,6 +1066,7 @@ if (!app.requestSingleInstanceLock()) {
     notifier = new Notifier({ getConfig, webPreferences: SECURE_PREFS, anchorWindow: () => overlayWin });
     setupNickRoller();
     applyFullscreenFix();
+    applyDecoy();
     registerIpc();
     createSplash();
     createOverlay(); // stays hidden (show:false) until the splash reports done, see finishSplash()
@@ -1011,5 +1093,5 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); if (chatHelper) chatHelper.stop(); });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); if (chatHelper) chatHelper.stop(); if (rpc) rpc.stop(); });
 }
