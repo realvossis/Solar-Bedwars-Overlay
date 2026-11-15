@@ -58,7 +58,20 @@ t('v1 config: killed-you trigger and its bogus watchlist flags are removed', () 
   const cfg = fresh().load();
   assert.ok(!('onKilledYou' in cfg.triggers)); assert.strictEqual(cfg.triggers.onNameInChat, false);
   assert.deepStrictEqual(Object.keys(cfg.watchlist), ['b']);
-  assert.strictEqual(JSON.parse(raw()).version, 2);
+  assert.strictEqual(JSON.parse(raw()).version, fresh().CONFIG_VERSION);
+});
+t('v2 -> v3: a Lunar log path becomes auto-follow, a custom file stays pinned', () => {
+  fs.writeFileSync(file, JSON.stringify({ version: 2, logPath: 'C:\\Users\\x\\.lunarclient\\profiles\\1.8\\logs\\latest.log' }));
+  assert.strictEqual(fresh().load().logMode, 'auto');
+  fs.writeFileSync(file, JSON.stringify({ version: 2, logPath: 'D:\\logs\\mine.log' }));
+  assert.strictEqual(fresh().load().logMode, 'manual');
+  assert.strictEqual(JSON.parse(raw()).version, 3);
+});
+t('v2 -> v3: the old default theme moves to the new one, a custom theme is kept', () => {
+  fs.writeFileSync(file, JSON.stringify({ version: 2, theme: { name: 'midnight', bg: '#0d1117', headerBg: '#161b22', text: '#e6edf3', accent: '#58a6ff', grid: '#21262d' } }));
+  assert.strictEqual(fresh().load().theme.name, 'solar');
+  fs.writeFileSync(file, JSON.stringify({ version: 2, theme: { name: 'rose', bg: '#1a0d14', headerBg: '#24121c', text: '#fce7f3', accent: '#f472b6', grid: '#33202b' } }));
+  assert.strictEqual(fresh().load().theme.name, 'rose');
 });
 t('prototype-pollution keys in a patch are dropped', () => {
   const c = fresh();

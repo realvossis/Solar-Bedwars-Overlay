@@ -1,11 +1,23 @@
 'use strict';
-// Tails whatever Minecraft log file the user points us at — Lunar, vanilla, Badlion,
+// Tails whatever Minecraft log file the user points us at — Lunar, OneClient, vanilla, Badlion,
 // doesn't matter which — and turns the chat noise into the normalized events below.
 // Also copes with the log getting rotated or truncated out from under us mid-read.
+//
+// Client differences handled here:
+//  - encoding: Lunar writes the log in the JVM's platform charset (Latin-1 on Windows), OneClient
+//    writes UTF-8. Each file's encoding is sniffed from its own bytes (see decodeLines).
+//  - OneClient's HyChatter mod restyles some Hypixel lines before they reach the log: game joins
+//    become "+ (3/16) Name", quits "- (2/16) Name", countdowns get a "⁎ " prefix, channel tags can be
+//    shortened ("P >", "G >"), DMs become "PM < Name: hi" / "PM > Name: hi". ChatTweaks' compact
+//    chat appends " (2)", " (3)" ... to repeated lines. Both styles are accepted everywhere.
+//  - Lunar puts a {"server":...} /locraw blob in chat on every server switch; OneClient doesn't, so
+//    server switches are also read from Hypixel's own "Sending you to ..." and lobby-join lines.
 //
 // What it emits:
 //   who(names[])        - /who or accumulated pre-game lobby
 //   lobbyJoin(name)     - "X has joined (n/m)!" or the real Bedwars "X joined the lobby!"
+//   lobbyEntered(name)  - YOU joined a lobby ("[MVP++] You joined the lobby!") - a lobby, not a game
+//   sessionUser(name)   - the account the game was launched with ("Setting user: Name")
 //   chatSpeaker(name)   - whoever just said anything in normal chat - a catch-all presence signal
 //                         independent of the exact join-message wording above
 //   quit(name)          - "X has quit!"
@@ -27,7 +39,9 @@
 //                         tally (e.g. "Victim was Killer's #3560 FINAL KILL!") — the only lead we
 //                         get on a nicked killer's real identity, see hypixel.findByFinalKills()
 //   houseEntered(name)  - teleporting into someone's Housing instance
-//   serverChange()      - sent to a new server / game over
+//   serverChange(info)  - sent to a new server: { server, gametype, mode, map, via } - via 'locraw'
+//                         (exact, from the JSON blob) or 'chat' (server name only, gametype unknown);
+//                         server undefined = switched, but to where is unknown (game over etc.)
 //   matchStarting()     - "The game starts in 1 second!"
 //   matchStart()        - the Bedwars start banner ("Protect your bed and destroy the enemy beds.")
 //   matchEnd(reason)    - you were eliminated (leaving/game over arrive as serverChange)
@@ -40,7 +54,17 @@ const stripRank = (s) => s.trim().replace(/^(?:\[[^\]]+\]\s*)+/, '').replace(/[^
 // Guild/Party/Officer chat lines put a "Guild > " style channel tag before the
 // rank+name, e.g. "Guild > [VIP] Name: text" — strip it before matching the
 // sender so mentions in those channels aren't missed (public chat has no tag).
-const CHANNEL_PREFIX = /^(?:Guild|Party|Officer|Co-op|Alliance)\s*>\s*/i;
+// HyChatter's "short channel names" turns those into single letters ("P > ", "G > ").
+const CHANNEL_PREFIX = /^(?:Guild|Party|Officer|Co-op|Alliance|Friend|[PGOF])\s*>\s*/i;
+const PARTY_CHANNEL = /^(?:Party|P)\s*>/i;
+// ChatTweaks (OneClient) marks a repeated line with " (2)", " (3)", ... at the end.
+const COMPACT_SUFFIX = /\s\(\d{1,4}\)$/;
+// Decorations clients put in front of Hypixel's own system lines (HyChatter: "⁎ The game starts in").
+const SYS_DECOR = /^[⁎•·*]\s+/;
+// Words that start real system lines in the "Label: value" shape ("Opponent: [MVP+] X") - never a
+// player talking, so never a chat speaker.
+const NOT_SPEAKERS = new Set(['opponent', 'opponents', 'winner', 'winners', 'map', 'mode', 'server', 'team', 'teams', 'teammate', 'teammates',
+  'reward', 'rewards', 'tip', 'note', 'lobby', 'status', 'total', 'party', 'kit', 'kills', 'online', 'friend', 'guild']);
 
 function chatOf(line) {
   const clean = stripColors(line);
@@ -56,7 +80,10 @@ const RANKS = '(?:\\[[^\\]]+\\]\\s*)*';
 // Chat-only prefixes in front of the rank: besides "[316✫]"-style brackets, Bedwars lobbies show the
 // star level in guillemets, e.g. "«2188❁» [MVP++] Name: hi" (the symbol arrives as "?" after the
 // log's Latin-1 decoding). Missing this format is what made mentions from those players vanish.
-const CHAT_PREFIX = '(?:(?:\\[[^\\]]+\\]|«[^»]{0,24}»)\\s*)*';
+// Titles shown in front of the rank in some lobbies ("Bridge Legend V [MVP++] Name: hi",
+// "[SPECTATOR] Overlord [MVP+] Name: gg") are accepted too, but only directly before a [RANK]
+// bracket, so a plain "Label: value" system line can't pass as someone talking.
+const CHAT_PREFIX = '(?:(?:\\[[^\\]]+\\]|«[^»]{0,24}»|[^\\[\\]:«»\\s][^\\[\\]:«»]{0,39}\\s(?=\\[))\\s*)*';
 // Every party/social pattern below is anchored at the start of the message. Player chat always
 // starts with the sender's own "[RANK] Name: ", so anchoring is what stops someone from typing
 // "Bob joined the party" in public chat and getting Bob treated as your party member.
@@ -90,6 +117,41 @@ const SEPARATOR = /^[-=▬]{8,}$/;
 const namesFrom = (list) => list.split(/[\s,●]+/).map(stripRank).filter(validName);
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Game join/quit lines, Hypixel's own wording and HyChatter's restyled ones. Anchored at both ends
+// (after the compact-chat counter is removed), so a player typing "+ Bob: hi" can never match.
+const COUNT = '\\(\\s*\\d+\\s*\\/\\s*\\d+\\s*\\)';
+const JOIN = [
+  new RegExp('^' + RANKS + '(' + NAME + ') has joined(?: ' + COUNT + ')?!(?:\\s*' + COUNT + ')?$'),
+  new RegExp('^\\+\\s*' + COUNT + '\\s*' + RANKS + '(' + NAME + ')$'),
+  new RegExp('^\\+\\s*' + RANKS + '(' + NAME + ')(?:\\s*' + COUNT + ')?$'),
+];
+const QUIT = [
+  new RegExp('^' + RANKS + '(' + NAME + ') has quit!(?:\\s*' + COUNT + ')?$'),
+  new RegExp('^-\\s*' + COUNT + '\\s*' + RANKS + '(' + NAME + ')$'),
+  new RegExp('^-\\s*' + RANKS + '(' + NAME + ')(?:\\s*' + COUNT + ')?$'),
+];
+// "[MVP++] Name joined the lobby!", ">>> ... <<<" for top ranks, and Hypixel's seasonal wordings.
+const LOBBY_JOIN = new RegExp('^(?:>>>\\s*)?' + RANKS + '(' + NAME + ')\\s+(?:joined|sled into|slid into|spooked into) the lobby!');
+
+// Splits a byte buffer into complete lines (the unfinished tail stays behind for the next read) and
+// decodes them. A UTF-8 file is recognised by its first non-ASCII bytes forming valid UTF-8
+// (Latin-1 text practically never does); the verdict sticks for that file.
+const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+function decodeLines(buf, state) {
+  const end = buf.lastIndexOf(0x0a);
+  if (end < 0) return { lines: [], rest: buf };
+  const body = buf.subarray(0, end + 1);
+  if (!state.encoding) {
+    let high = false;
+    for (let i = 0; i < body.length; i++) if (body[i] >= 0x80) { high = true; break; }
+    if (high) { try { utf8Strict.decode(body); state.encoding = 'utf8'; } catch (_) { state.encoding = 'latin1'; } }
+  }
+  const text = body.toString(state.encoding === 'utf8' ? 'utf8' : 'latin1');
+  const lines = text.split(/\r?\n/);
+  lines.pop(); // the empty string after the final newline
+  return { lines, rest: Buffer.from(buf.subarray(end + 1)) };
+}
+
 class LogWatcher extends EventEmitter {
   constructor() {
     super();
@@ -98,7 +160,9 @@ class LogWatcher extends EventEmitter {
     this.ino = 0;
     this.watcher = null;
     this.timer = null;
-    this.buffer = '';
+    this.buffer = Buffer.alloc(0);
+    this.decode = { encoding: null }; // per file, see decodeLines
+    this._reading = false;
     this.selfNames = [];
     this._selfRe = null;
     this._ok = false;
@@ -115,6 +179,7 @@ class LogWatcher extends EventEmitter {
   start(logPath) {
     this.stop();
     this.path = logPath;
+    this.decode = { encoding: null };
     if (!logPath) { this.emit('status', { ok: false, msg: 'no log path set' }); return; }
     let st = null;
     try { st = fs.statSync(logPath); } catch (_) {}
@@ -130,10 +195,19 @@ class LogWatcher extends EventEmitter {
 
   stop() {
     if (this.timer) clearInterval(this.timer);
-    this.timer = null; this.buffer = ''; this._roster = null;
+    this.timer = null; this.buffer = Buffer.alloc(0); this._roster = null;
+  }
+
+  // Feeds raw bytes (as read from the file) through line splitting + decoding + parsing.
+  _feed(bytes) {
+    const { lines, rest } = decodeLines(this.buffer.length ? Buffer.concat([this.buffer, bytes]) : bytes, this.decode);
+    // A single runaway line (binary junk, a huge stack trace without newlines) can't grow forever.
+    this.buffer = rest.length > 1 << 20 ? Buffer.alloc(0) : rest;
+    for (const l of lines) this._parse(l);
   }
 
   _poll() {
+    if (this._reading) return;
     let st;
     try { st = fs.statSync(this.path); } catch (_) { return; } // not there yet (or again) - keep waiting
     // The file didn't exist a moment ago and just appeared (first-ever launch, or the overlay
@@ -149,24 +223,27 @@ class LogWatcher extends EventEmitter {
     // startup logging outgrows our old, stale `pos` before the next 400ms poll, which otherwise
     // leaves us reading from a garbage mid-file offset in a different game session entirely -
     // silently skipping the early who/party lines that seed the roster.
-    if (this.ino && st.ino && st.ino !== this.ino) this.pos = 0;
+    const rotated = (this.ino && st.ino && st.ino !== this.ino) || st.size < this.pos; // new file / truncated in place
+    if (rotated) { this.pos = 0; this.buffer = Buffer.alloc(0); this.decode = { encoding: null }; }
     this.ino = st.ino;
-    if (st.size < this.pos) this.pos = 0; // truncated in place (belt-and-suspenders, e.g. same ino somehow)
     if (st.size === this.pos) return;
-    const stream = fs.createReadStream(this.path, { start: this.pos, end: st.size });
-    let chunk = '';
-    // Minecraft/Lunar write logs in the JVM's platform charset (Latin-1 on Windows), not UTF-8 —
-    // decoding as utf8 turns every §-color-code byte into a replacement char and silently breaks
-    // all rank/name parsing in colored chat lines (which is most real chat).
-    stream.on('data', (d) => { chunk += d.toString('latin1'); });
-    stream.on('end', () => {
-      this.pos = st.size;
-      this.buffer += chunk;
-      const lines = this.buffer.split(/\r?\n/);
-      this.buffer = lines.pop(); // keep partial last line
-      for (const l of lines) this._parse(l);
+    // Raw bytes, decoded per file (see decodeLines): Lunar's Latin-1 log decoded as UTF-8 would turn
+    // every §-colour byte into a replacement char, and OneClient's UTF-8 log decoded as Latin-1 would
+    // turn every § into "Â§" - either way rank/name parsing in coloured chat silently breaks.
+    const start = this.pos, end = st.size, me = this.path;
+    this._reading = true;
+    fs.open(me, 'r', (err, fd) => {
+      if (err) { this._reading = false; return; }
+      const len = Math.min(end - start, 8 << 20); // at most 8 MB per poll; the rest comes next poll
+      const buf = Buffer.alloc(len);
+      fs.read(fd, buf, 0, len, start, (rerr, n) => {
+        fs.close(fd, () => {});
+        this._reading = false;
+        if (rerr || this.path !== me || this.pos !== start) return; // switched files / restarted meanwhile
+        this.pos = start + n;
+        this._feed(buf.subarray(0, n));
+      });
     });
-    stream.on('error', () => {});
   }
 
   _parse(rawLine) {
@@ -181,6 +258,19 @@ class LogWatcher extends EventEmitter {
     // when the line was actually tagged - restrict the "someone said something" detection below
     // (chatSpeaker/mention) to that, without narrowing chatOf() itself for everything else.
     const isChatLine = /\[CHAT\]/.test(stripColors(rawLine));
+    // The same message without OneClient's compact-chat counter and system-line decoration, for
+    // the patterns that are anchored at the end or start with a fixed phrase.
+    const sys = msg.replace(COMPACT_SUFFIX, '').replace(SYS_DECOR, '');
+
+    // ---- the account the game runs as - a plain log line, never chat (so chat can't fake it) ----
+    if (!isChatLine) {
+      const u = msg.match(/^Setting user: ([A-Za-z0-9_]{1,16})$/);
+      if (u) { this.emit('sessionUser', u[1]); return; }
+    }
+    // HyChatter's terse "+ Name" / "- Name" forms only ever arrive as chat; never read them out of
+    // other log lines (a mod list like "- somemod" would otherwise look like a quit).
+    const joinForms = isChatLine ? JOIN : JOIN.slice(0, 1);
+    const quitForms = isChatLine ? QUIT : QUIT.slice(0, 1);
 
     // ---- /who or auto-who: "ONLINE: a, b, c" ----
     let m = msg.match(/^ONLINE:\s*(.+)$/);
@@ -190,27 +280,22 @@ class LogWatcher extends EventEmitter {
       return;
     }
 
-    // ---- pre-game lobby fill: "Name has joined (1/16)!" (seen on some other lobby types) ----
-    m = msg.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') has joined \\(\\d+\\/\\d+\\)!'));
-    if (m) { this.emit('lobbyJoin', m[1]); return; }
+    // ---- pre-game lobby fill: "Name has joined (1/16)!", OneClient: "+ (01/16) Name" ----
+    for (const re of joinForms) { m = sys.match(re); if (m) { this.emit('lobbyJoin', m[1], 'game'); return; } }
 
-    // ---- Bedwars pre-game lobby fill, real captured format: ">>> [rank] Name joined the lobby! <<<"
-    // for boosted/high-rank players, or just "[rank] Name joined the lobby!" (no arrows) for everyone
-    // else - NOT the "(n/m)" form above, which never actually appears here. Verified against a real
-    // captured log; this was the actual reason join detection silently caught nobody in the pre-game
-    // lobby before. ----
-    m = msg.match(new RegExp('^(?:>>>\\s*)?(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')\\s+joined the lobby!'));
-    if (m) { this.emit('lobbyJoin', m[1]); return; }
+    // ---- lobby joins: "[rank] Name joined the lobby!", ">>> [MVP++] Name joined the lobby! <<<".
+    // Yours means you're in a lobby (no game instance ever shows these); anyone else's is a lobby-mate.
+    m = msg.match(LOBBY_JOIN);
+    if (m) { if (this._isSelf(m[1])) this.emit('lobbyEntered', m[1]); else this.emit('lobbyJoin', m[1], 'lobby'); return; }
 
     // ---- match lifecycle (drives "hide overlay during matches"). Exact Hypixel system lines, verified
     // against real logs; anchored, so nobody can fake them in chat (chat starts with the sender). ----
-    if (/^The game starts in 1 second!/.test(msg)) { this.emit('matchStarting'); return; }
-    if (/^Protect your bed and destroy the enemy beds\./.test(msg)) { this.emit('matchStart'); return; }
-    if (/^You have been eliminated!/.test(msg)) { this.emit('matchEnd', 'eliminated'); return; }
+    if (/^The game starts in 1 second!/.test(sys)) { this.emit('matchStarting'); return; }
+    if (/^Protect your bed and destroy the enemy beds\./.test(sys)) { this.emit('matchStart', 'BEDWARS'); return; }
+    if (/^You have been eliminated!/.test(sys)) { this.emit('matchEnd', 'eliminated'); return; }
 
-    // ---- quit: "Name has quit!" ----
-    m = msg.match(new RegExp('^(?:\\[[^\\]]+\\]\\s*)*(' + NAME + ') has quit!'));
-    if (m) { this.emit('quit', m[1]); return; }
+    // ---- quit: "Name has quit!", OneClient: "- (02/16) Name" ----
+    for (const re of quitForms) { m = sys.match(re); if (m) { this.emit('quit', m[1]); return; } }
 
     // ---- Housing: "Attempting to teleport you to [Rank] Name's house..." — the only real
     // clue to who the house belongs to, since Housing has no lobby-fill/kill-feed messages
@@ -218,16 +303,17 @@ class LogWatcher extends EventEmitter {
     m = msg.match(new RegExp('^Attempting to teleport you to (?:\\[[^\\]]+\\]\\s*)*(' + NAME + ')\'s house'));
     if (m) { this.emit('houseEntered', m[1]); return; }
 
+    // Unstripped: "Party Members (4)" ends in what looks like a compact-chat counter.
     if (this._parseParty(msg)) return;
 
     // ---- friend request: "X has sent you a friend request!" / "Friend request from X" ----
     m = msg.match(P.friendReq1) || msg.match(P.friendReq2);
     if (m) { this.emit('friendRequest', m[1]); return; }
 
-    // ---- direct messages: "From [rank] Name: text" / "To Name: text" ----
-    m = msg.match(new RegExp('^From (?:\\[[^\\]]+\\]\\s*)*(' + NAME + '):\\s*(.*)$'));
-    if (m) { this.emit('dmFrom', m[1], m[2]); return; }
-    m = msg.match(new RegExp('^To (?:\\[[^\\]]+\\]\\s*)*(' + NAME + '):\\s*(.*)$'));
+    // ---- direct messages: "From [rank] Name: text" / "To Name: text", OneClient "PM < Name: text" ----
+    m = msg.match(new RegExp('^(?:From|PM\\s*<)\\s*' + RANKS + '(' + NAME + '):\\s*(.*)$'));
+    if (m) { this.emit('dmFrom', m[1], m[2].replace(COMPACT_SUFFIX, '')); return; }
+    m = msg.match(new RegExp('^(?:To|PM\\s*>)\\s*' + RANKS + '(' + NAME + '):\\s*(.*)$'));
     if (m) { this.emit('dmTo', m[1]); return; }
 
     // ---- kill line carrying the killer's running lifetime final-kill count, e.g.
@@ -238,8 +324,7 @@ class LogWatcher extends EventEmitter {
     if (m) { this.emit('finalKillCount', { victim: m[1], killer: m[2], count: parseInt(m[3], 10) }); }
 
     // ---- server / game change -> clear ----
-    // Lunar (and maybe other clients with a similar "server info" feature - unconfirmed) drops a
-    // raw status blob straight into chat on every server switch, e.g.
+    // Lunar drops the /locraw status blob straight into chat on every server switch, e.g.
     // {"server":"dynamiclobby39C","gametype":"BEDWARS","lobbyname":"..."} or
     // {"server":"mini116CN","gametype":"BEDWARS","mode":"...","map":"..."}, or just
     // {"server":"limbo"} with no gametype at all for the hub. Verified against a real captured
@@ -257,23 +342,24 @@ class LogWatcher extends EventEmitter {
       // never on a lobby - that's how "in a game" is told apart from "in a lobby".
       const md = msg.match(/"mode"\s*:\s*"([^"]+)"/);
       const mp = msg.match(/"map"\s*:\s*"([^"]+)"/);
-      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null, mode: md ? md[1] : null, map: mp ? mp[1] : null });
+      this.emit('serverChange', { server: m[1], gametype: gt ? gt[1] : null, mode: md ? md[1] : null, map: mp ? mp[1] : null, via: 'locraw' });
       return;
     }
-    // The "Bed Wars" banner line some clients were assumed to print never actually showed up in a
-    // real captured log (same lesson as lobbyJoin's old pattern) - dropped rather than left in as
-    // dead, unverified weight. "Sending you to X!"/"1st Killer"/"You are now in" are genuine
-    // Hypixel-sent text (confirmed real, just don't carry a gametype), kept as a fallback for
-    // whenever the JSON blob above isn't present.
-    if (/^Sending you to /.test(msg) || /^\s*1st Killer/.test(msg) || /^You are now in /.test(msg)) {
-      this.emit('serverChange', { server: undefined, gametype: undefined }); // unknown (see main.js)
+    // Hypixel's own "Sending you to mini114BA!" names the server you're being moved to - every
+    // client shows it, so it's how OneClient (no /locraw blob) learns about switches. It can't say
+    // which game it is; main.js fills that in. "1st Killer"/"You are now in" mean a switch to
+    // somewhere unknown.
+    m = sys.match(/^Sending you to ([A-Za-z0-9_-]{2,40})(?:!|\.\.\.|\.)?$/);
+    if (m) { this.emit('serverChange', { server: m[1], gametype: undefined, mode: undefined, map: undefined, via: 'chat' }); return; }
+    if (/^\s*1st Killer/.test(msg) || /^You are now in /.test(msg)) {
+      this.emit('serverChange', { server: undefined, gametype: undefined, via: 'chat' }); // unknown (see main.js)
       // don't return; a game-over line could still mention you
     }
 
     // ---- normal chat ("Rank Name: text" / "Rank Name [Guild tag]: text") - whoever's talking in
     // PUBLIC chat is obviously actually in the lobby/game with you, just as good a signal as a
-    // who/join line (whose exact wording varies more than you'd hope - see the two lobbyJoin
-    // patterns above) and not dependent on matching one particular message format. Guild/Party/
+    // who/join line (whose exact wording varies more than you'd hope - see the join patterns
+    // above) and not dependent on matching one particular message format. Guild/Party/
     // Officer/Co-op/Alliance chat is excluded from that, though - those channels reach people
     // anywhere on the network, not just your current lobby, so treating a guildmate chatting from
     // some other server as "here" would be actively wrong. Party chat specifically is redundant
@@ -281,16 +367,19 @@ class LogWatcher extends EventEmitter {
     // real [CHAT] tag (see isChatLine above) so startup diagnostic dumps that just happen to look
     // like "Label: value" (OptiFine's "Capabilities:"/"OpenGL:"/"Renderer:"/... block, none of
     // which are ever chat-tagged) can't be mistaken for someone named "OpenGL" talking. ----
+    if (!isChatLine) return;
     const hasChannelPrefix = CHANNEL_PREFIX.test(msg);
     const body = msg.replace(CHANNEL_PREFIX, '');
-    const cm = isChatLine && body.match(new RegExp('^' + CHAT_PREFIX + '(' + NAME + ')(?:\\s*\\[[^\\]]+\\])*\\s*:\\s*(.*)$'));
+    const cm = body.match(new RegExp('^' + CHAT_PREFIX + '(' + NAME + ')(?:\\s*\\[[^\\]]+\\])*\\s*:\\s*(.*)$'));
     if (cm) {
+      const text = cm[2].replace(COMPACT_SUFFIX, '');
+      if (NOT_SPEAKERS.has(cm[1].toLowerCase())) return; // a system line shaped like chat
       if (!hasChannelPrefix) this.emit('chatSpeaker', cm[1]);
       // Anyone talking in party chat is, by definition, in your party right now - the most common
       // way members show up without anybody running /p list.
-      else if (/^Party\s*>/i.test(msg) && !this._isSelf(cm[1])) this.emit('partyMember', cm[1]);
-      if (this._selfRe && !this._isSelf(cm[1]) && this._selfRe.test(cm[2])) {
-        this.emit('mention', { by: cm[1], text: cm[2] });
+      else if (PARTY_CHANNEL.test(msg) && !this._isSelf(cm[1])) this.emit('partyMember', cm[1]);
+      if (this._selfRe && !this._isSelf(cm[1]) && this._selfRe.test(text)) {
+        this.emit('mention', { by: cm[1], text });
       }
     }
   }
@@ -345,4 +434,4 @@ class LogWatcher extends EventEmitter {
   }
 }
 
-module.exports = { LogWatcher, stripRank, chatOf, validName };
+module.exports = { LogWatcher, stripRank, chatOf, validName, decodeLines };

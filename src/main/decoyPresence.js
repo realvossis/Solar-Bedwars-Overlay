@@ -15,6 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
+const { versionOf } = require('./clients');
 
 const LUNAR_CLIENT_ID = '671636579701358592';
 const HYPIXEL_LOGO = 'https://servermappings.lunarclientcdn.com/logos/hypixel.png';
@@ -51,11 +52,10 @@ function pickDecoy({ realMode, realMap, style = 'other', last = null, rand = Mat
   return { mode, map: pick(fresh.length ? fresh : all, rand) };
 }
 
-// "Minecraft 1.8.9" from the log path's Lunar profile folder (.lunarclient\profiles\1.8\logs\...).
+// "Minecraft 1.8.9" from the log path's version folder: Lunar's profile (.lunarclient\profiles\1.8\logs)
+// or OneClient's cluster (OneClient\clusters\1.8.9 Fabric\logs). Anything else is taken as 1.8.9.
 function versionLabel(logPath) {
-  const m = String(logPath || '').match(/[\\/]profiles[\\/]([^\\/]+)[\\/]logs[\\/]/i);
-  const v = m ? m[1] : '1.8';
-  return 'Minecraft ' + ({ '1.8': '1.8.9', '1.7': '1.7.10' }[v] || v);
+  return 'Minecraft ' + (versionOf(logPath) || '1.8.9');
 }
 
 // The activity Lunar would send for that state. fake = null -> the lobby / no-game shape.
@@ -102,7 +102,7 @@ function javaPids(run = execFile) {
 function findGame(run = execFile) {
   if (process.platform !== 'win32') return Promise.resolve(null);
   const ps = "Get-CimInstance Win32_Process -Filter \"Name='javaw.exe' OR Name='java.exe'\" | " +
-    "Where-Object { $_.CommandLine -match '--assetIndex|--gameDir|net\\.minecraft\\.client|moonsworth|lunarclient' } | " +
+    "Where-Object { $_.CommandLine -match '--assetIndex|--gameDir|net\\.minecraft\\.client|moonsworth|lunarclient|Polyfrost|fabric\\.gameVersion' } | " +
     "Sort-Object CreationDate -Descending | Select-Object -First 1 | " +
     "ForEach-Object { '' + $_.ProcessId + ' ' + ([DateTimeOffset]$_.CreationDate).ToUnixTimeMilliseconds() }";
   return new Promise((resolve) => {

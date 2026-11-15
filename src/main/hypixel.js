@@ -111,6 +111,22 @@ class Hypixel {
     return data;
   }
 
+  // Where a player is right now: { online, gameType, mode, map } (Hypixel's /status). Used for your
+  // own account to tell which game you joined on clients that don't report it themselves. Never
+  // cached - it's only asked right after a server switch. online=false also when the player has
+  // hidden their online status from the API (Hypixel's in-game API settings).
+  async fetchStatus(uuid) {
+    const cfg = this.getConfig();
+    if (!cfg.hypixelKey || !/^[0-9a-f]{32}$/.test(String(uuid || ''))) return null;
+    await this.limiter();
+    const r = await fetch('https://api.hypixel.net/v2/status?uuid=' + uuid, withTimeout({ headers: { 'API-Key': cfg.hypixelKey } }));
+    if (!r.ok) return null;
+    const j = await r.json().catch(() => null);
+    if (!j || !j.success || !j.session) return null;
+    const s = j.session;
+    return { online: !!s.online, gameType: s.gameType || null, mode: s.mode || null, map: s.map || null };
+  }
+
   // Keep one snapshot per UTC day; retain ~45 days for the monthly window.
   recordSnapshot(uuid, player) {
     if (!player) return;

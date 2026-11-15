@@ -57,6 +57,18 @@ contextBridge.exposeInMainWorld('solarBridge', {
   openLink: (url) => invoke('link:open', url),
   splashDone: () => invoke('splash:done'),
 
+  // game client + where you are (see clients.js / location.js)
+  getGameStatus: () => invoke('game:status'),
+  onGameStatus: (cb) => on('game:status', cb),
+  detectedLogs: () => invoke('logs:detect'),
+  useLog: (p) => invoke('log:use', p),
+
+  // updates (see updater.js)
+  getUpdateState: () => invoke('update:state'),
+  onUpdateState: (cb) => on('update:state', cb),
+  checkForUpdate: () => invoke('update:check'),
+  installUpdate: () => invoke('update:install'),
+
   // events
   onToast: (cb) => on('toast', cb),
   onLogStatus: (cb) => on('log:status', cb),

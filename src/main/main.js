@@ -23,6 +23,9 @@ const { readEntry } = require('./zipReader');
 const png = require('./png');
 const { DiscordRpc } = require('./discordRpc');
 const decoy = require('./decoyPresence');
+const clients = require('./clients');
+const { Locator, describe: describePlace } = require('./location');
+const { Updater } = require('./updater');
 
 // ---------------- rendering pipeline ----------------
 // The overlay is a transparent, topmost window sitting directly over Minecraft's OpenGL surface.
@@ -34,16 +37,58 @@ const gpuAtLaunch = !!config.readEarly('gpuAcceleration', false);
 if (!gpuAtLaunch) app.disableHardwareAcceleration();
 
 let overlayWin = null, settingsWin = null, blacklistWin = null, splashWin = null, tray = null;
-let hypixel, urchin, roster, watcher, nickRoller, notifier;
+let hypixel, urchin, roster, watcher, nickRoller, notifier, updater;
 let refreshTimer = null;
 let lastLogStatus = { ok: false, msg: 'not started' };
-// The last known raw server code (e.g. "mini116CN", "dynamiclobby25G", "limbo") - undefined until
-// something's actually been observed this launch. "mini*" is your real, small match instance;
-// "dynamiclobby*" is BedWars' shared matchmaking staging pool, which turned out to be just as
-// noisy as the hub despite technically being gametype BEDWARS (see logWatcher.js) - so
-// inBedwarsMatch() below, not a plain gametype check, is what actually gates lobbyJoin/chatSpeaker.
-let currentServer;
-function inBedwarsMatch() { return typeof currentServer === 'string' && /^mini/i.test(currentServer); }
+// Where you are on Hypixel (see location.js). The raw server code (e.g. "mini116CN") matters:
+// "mini*" is your real, small match instance, while lobbies (Bed Wars' "dynamiclobby*" included)
+// are as noisy as the hub - so inBedwarsMatch(), not a plain gametype check, is what gates the
+// passive lobbyJoin/chatSpeaker pickers. A game whose type isn't known yet counts as Bed Wars.
+const locator = new Locator();
+function inBedwarsMatch() { return locator.inGameServer && /^mini/i.test(locator.server || '') && (!locator.gametype || locator.gametype === 'BEDWARS'); }
+// The client log being followed (see clients.js): { client, name, label, path }.
+let activeLog = null;
+// The account the game was launched with, read from the log - used when no IGN is set.
+let sessionName = null;
+let placeSignal = () => {}; // set by wireWatcher - feeds a location signal (see onPlaceSignal)
+
+// ---- which game did we just join? ----
+// Lunar answers that itself (its /locraw blob). On other clients only "Sending you to mini12A!" is
+// known, so Solar asks Hypixel's status API for your own account - the exact game and mode, without
+// touching the game. If that's unavailable (no key, or your online status is hidden from the API)
+// AND a feature that types into chat needs to know it's Bed Wars (party warnings, auto-dodge),
+// Solar sends /locraw itself once - the same command Lunar sends - and reads the reply from the log.
+let statusApiMisses = 0, pendingLocraw = null;
+const needsGametype = () => !!(getConfig().chatWarn || {}).partyAuto || !!(getConfig().autoDodge || {}).enabled;
+async function selfUuid() {
+  const name = getConfig().selfName || sessionName;
+  if (!name || !validName(name)) return null;
+  try { const r = await hypixel.resolveUuid(name); return r ? r.id : null; } catch (_) { return null; }
+}
+async function resolvePlace(gen) {
+  if (getConfig().hypixelKey && statusApiMisses < 3) {
+    const uuid = await selfUuid();
+    for (const wait of uuid ? [1200, 2500, 4000] : []) {
+      await new Promise((r) => setTimeout(r, wait));
+      if (gen !== locator.gen || locator.gametype) return; // moved on, or answered meanwhile (Lunar's blob)
+      let s = null;
+      try { s = await hypixel.fetchStatus(uuid); } catch (_) {}
+      if (!s) continue;
+      if (!s.online) { statusApiMisses++; break; } // online status hidden from the API
+      statusApiMisses = 0;
+      if (s.mode && s.mode !== 'LOBBY' && s.gameType) { placeSignal({ via: 'api', gametype: s.gameType, mode: s.mode, map: s.map }); return; }
+      // still shows the lobby you came from - Hypixel catches up within a few seconds
+    }
+  }
+  if (gen !== locator.gen || locator.gametype || getConfig().locrawFallback === false || !needsGametype()) return;
+  pendingLocraw = { gen, expires: Date.now() + 15000 };
+}
+async function runLocraw() {
+  const l = pendingLocraw;
+  if (l.gen !== locator.gen || locator.gametype || inMatch || Date.now() > l.expires) { pendingLocraw = null; return; }
+  const r = await typeIntoChat('/locraw', true);
+  if (r === 'ok' || !/^(notmc|notfg|keysheld|busy)$/.test(r)) pendingLocraw = null;
+}
 
 const getConfig = () => config.load();
 const ICON = path.join(__dirname, '..', '..', 'assets', 'icon-256.png');
@@ -119,7 +164,6 @@ function finishSplash() {
 //   always - always shown; Alt+B still hides it and that choice sticks.
 // Notifications are separate and keep working in every mode.
 let splashFinished = false, inMatch = false, overlayOverride = null, matchStartTimer = null, lobbyTimer = null;
-let currentGametype = null, currentMode = null;
 const overlayMode = () => { const m = getConfig().overlayMode; return m === 'manual' || m === 'always' ? m : 'auto'; };
 function overlayWanted() {
   if (overlayOverride !== null) return overlayOverride;
@@ -141,6 +185,7 @@ function setInMatch(v) {
   inMatch = v;
   if (overlayMode() === 'auto') overlayOverride = null; // in auto, an Alt+B choice lasts one phase
   applyOverlayVisibility();
+  pushGameStatus();
 }
 
 // Each of these touches window state the OS compositor (DWM) cares about - topmost z-order and
@@ -228,10 +273,65 @@ function broadcast(channel, payload) {
 function toast(msg, kind = 'info') { broadcast('toast', { msg, kind, ts: Date.now() }); }
 
 // ---------------- log watcher wiring ----------------
+// Which log to read: in 'auto' mode (the default) whichever client you're playing on right now -
+// Lunar, OneClient, ... - re-checked every few seconds so switching clients needs no setup. In
+// 'manual' mode exactly the file picked in Settings.
+function chooseLog() {
+  const cfg = getConfig();
+  if (cfg.logMode === 'manual') {
+    if (!cfg.logPath) return null;
+    const client = clients.clientOf(cfg.logPath);
+    return { client, name: clients.CLIENTS[client], label: clients.CLIENTS[client], path: cfg.logPath, mtime: 0 };
+  }
+  return clients.pickActive(clients.detectLogs());
+}
+function selfNames() { const cfg = getConfig(); return [cfg.selfName || sessionName, ...(cfg.reactNames || [])]; }
 function startWatcher() {
   const cfg = getConfig();
-  watcher.setSelfNames([cfg.selfName, ...(cfg.reactNames || [])]);
-  if (cfg.logEnabled) watcher.start(cfg.logPath); else watcher.stop();
+  watcher.setSelfNames(selfNames());
+  if (!cfg.logEnabled) { watcher.stop(); activeLog = null; lastLogStatus = { ok: false, msg: 'log reading is off' }; pushGameStatus(); return; }
+  const pick = chooseLog();
+  if (!pick) { watcher.stop(); activeLog = null; lastLogStatus = { ok: false, msg: 'no Minecraft client found yet' }; pushGameStatus(); return; }
+  if (activeLog && activeLog.path === pick.path && watcher.timer) { activeLog = pick; return; } // already on it
+  const switching = !!activeLog;
+  activeLog = pick;
+  watcher.start(pick.path);
+  if (switching) { locator.reset(); setInMatch(false); }
+  pushGameStatus();
+}
+// Auto mode: follow the log that's being written to. Cheap (a few directory listings + stats).
+let followTimer = null;
+function followTick() {
+  const cfg = getConfig();
+  if (!cfg.logEnabled || cfg.logMode === 'manual') return;
+  const pick = clients.pickActive(clients.detectLogs());
+  if (!pick || (activeLog && pick.path === activeLog.path)) return;
+  // Only move once the other log is actually newer than ours (a client was just launched/played).
+  let ours = 0; try { ours = activeLog ? fs.statSync(activeLog.path).mtimeMs : 0; } catch (_) {}
+  if (pick.mtime <= ours) return;
+  console.log('following', pick.label, pick.path);
+  startWatcher();
+  toast(`Now reading ${pick.name}`);
+}
+
+// One status object for every window: which client, whether its log is readable, where you are.
+function gameStatus() {
+  const p = locator.place;
+  return {
+    client: activeLog ? activeLog.client : null, clientName: activeLog ? activeLog.name : null, label: activeLog ? activeLog.label : null,
+    path: activeLog ? activeLog.path : null, mode: getConfig().logMode === 'manual' ? 'manual' : 'auto',
+    log: lastLogStatus, inMatch,
+    place: { kind: p.kind, server: p.server, gametype: p.gametype, mode: p.mode, map: p.map, via: p.via, label: describePlace(p, inMatch, decoy.MODES) },
+  };
+}
+let statusPushTimer = null;
+function pushGameStatus() {
+  clearTimeout(statusPushTimer);
+  statusPushTimer = setTimeout(() => {
+    const st = gameStatus();
+    if (!app.isPackaged && process.env.SOLAR_DEBUG) console.log('[status]', st.clientName, st.log && st.log.msg, JSON.stringify(st.place));
+    broadcast('game:status', st);
+  }, 50);
 }
 
 async function watchlistAdd(name, reason, kind) {
@@ -259,13 +359,26 @@ function wireWatcher() {
   // Both of these are passive background noise-pickers, not a deliberate action like /who - so
   // both require inBedwarsMatch() (your actual small match instance), not just "somewhere
   // Bedwars-flagged" - the shared matchmaking staging lobby is also gametype BEDWARS but is just
-  // as noisy as the hub, see currentServer's comment above.
+  // as noisy as the hub, see the locator's comment above.
   // Bedwars pre-game lobbies scramble names in join/quit messages (anti-sniping: "VK2Gk4HS has
   // joined (4/16)!" - verified in real logs), and /who is refused there. Those names are random, so
   // they're ignored: in the pre-game lobby players are added only when they talk in chat (chat shows
   // real names), and everyone once the game starts and the real player list is revealed.
-  const scrambledJoins = () => currentGametype === 'BEDWARS' && !!currentMode && !inMatch;
-  watcher.on('lobbyJoin', (n) => { if (inBedwarsMatch() && !scrambledJoins()) roster.addNames([n], 'GAME'); });
+  // The same scrambling shows up in Duels and other games' pre-game lobbies (and on every client), so
+  // join lines are ignored in any game until it starts.
+  const scrambledJoins = () => locator.inGameServer && !inMatch;
+  watcher.on('lobbyJoin', (n, kind) => {
+    // Someone joining "the lobby" means you're in one - no game instance ever shows that line.
+    if (kind === 'lobby') { onPlaceSignal({ via: 'chat', lobby: true }); return; }
+    if (inBedwarsMatch() && !scrambledJoins()) roster.addNames([n], 'GAME');
+  });
+  watcher.on('lobbyEntered', () => onPlaceSignal({ via: 'chat', lobby: true, self: true }));
+  // Your account, straight from the game's own log: fills in "Your IGN" if it's still empty.
+  watcher.on('sessionUser', (name) => {
+    sessionName = name;
+    watcher.setSelfNames(selfNames());
+    if (!getConfig().selfName) { config.save({ selfName: name }); applySelf(); broadcastConfig(); toast(`Signed in as ${name}`); }
+  });
   // Opt-in (see trackChatSpeakers in Settings) on top of that - some people still don't want
   // random match-lobby chatter added even once scoped correctly.
   watcher.on('chatSpeaker', (n) => { if (getConfig().trackChatSpeakers && inBedwarsMatch()) roster.addNames([n], 'GAME'); });
@@ -284,34 +397,54 @@ function wireWatcher() {
   });
   // Match phases -> overlay auto-hide.
   watcher.on('matchStarting', () => { clearTimeout(matchStartTimer); matchStartTimer = setTimeout(() => setInMatch(true), 1500); });
-  watcher.on('matchStart', () => setInMatch(true));
+  watcher.on('matchStart', (gametype) => {
+    if (gametype && locator.gameStarted(gametype)) decoyOnServer();
+    setInMatch(true);
+  });
   watcher.on('matchEnd', () => setInMatch(false));
   watcher.on('serverChange', (info) => {
-    if (info && info.server !== undefined) {
-      // Exact answer from the client's status blob: a "mode" means a game instance. Bedwars games
-      // start with a pre-game lobby worth scouting (hidden later by the start banner); any other
-      // game (Duels, SkyWars, ...) counts as "in a match" right away. No mode = a lobby.
-      currentGametype = info.gametype || null;
-      currentMode = info.mode || null;
-      setInMatch(!!info.mode && info.gametype !== 'BEDWARS');
-    } else {
-      // Plain-text fallback ("Sending you to ...") can't say where to - wait briefly for the exact
-      // blob instead of flashing the overlay up on the way into a Duels game.
-      clearTimeout(lobbyTimer);
-      lobbyTimer = setTimeout(() => setInMatch(false), 2500);
-    }
-    // undefined means "changed servers, but we don't actually know which one" (the plain-text
-    // fallback patterns can't tell) - leave currentServer alone rather than guessing. Any real
-    // string (including "limbo") is an actual answer from the JSON status blob and overwrites it.
-    if (info && info.server !== undefined) currentServer = info.server;
-    decoyOnServer(info);
+    if (info && info.server !== undefined) { onPlaceSignal(info); return; }
+    // Switched, but to somewhere unknown (game over lines): wait briefly for a better signal
+    // instead of flashing the overlay up on the way into another game.
+    clearTimeout(lobbyTimer);
+    lobbyTimer = setTimeout(() => setInMatch(false), 2500);
+    newLobby();
+  });
+  // Everything that resets when you really land somewhere new.
+  function newLobby() {
     threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
     partyWarned.clear(); partyWarnQueue.length = 0; publicWarnIndex = 0; pendingDodge = null; dodgedThisLobby = false;
-    pendingSummary = null; summaryDoneThisMatch = false;
+    pendingSummary = null; summaryDoneThisMatch = false; pendingLocraw = null;
     if (getConfig().clearOnServerChange) roster.clear();
     if (pendingHouseOwner && Date.now() - pendingHouseOwnerTs < 8000) roster.addNames([pendingHouseOwner], 'house');
     pendingHouseOwner = null;
-  });
+  }
+  // A location signal from any source (see location.js).
+  function onPlaceSignal(info) {
+    const r = locator.signal(info);
+    if (r === 'ignore') return;
+    const p = locator.place;
+    if (r === 'change') newLobby();
+    if (p.kind !== 'game') {
+      setInMatch(false);
+    } else if (p.gametype) {
+      // Exact answer: Bedwars games start with a pre-game lobby worth scouting (hidden later by the
+      // start banner); any other game (Duels, SkyWars, ...) counts as "in a match" right away.
+      setInMatch(p.gametype !== 'BEDWARS');
+    } else if (r === 'change') {
+      // A game, but which one isn't known yet: wait briefly for the exact answer (Lunar's blob, the
+      // status API) instead of flashing the overlay up on the way into a Duels game.
+      clearTimeout(lobbyTimer);
+      lobbyTimer = setTimeout(() => setInMatch(false), 2500);
+      resolvePlace(locator.gen);
+    }
+    // Learning only now that this is Bed Wars: players who loaded meanwhile still get their party
+    // warning / dodge check (each is once per player per lobby anyway).
+    if (r === 'enrich' && p.gametype === 'BEDWARS' && !inMatch) for (const row of roster.players.values()) if (!row.loading) checkThreat(row);
+    decoyOnServer();
+    pushGameStatus();
+  }
+  placeSignal = onPlaceSignal;
 
   // ---- party: tracked from every signal Hypixel gives, so /p list is never required ----
   watcher.on('partyJoin', (names) => {
@@ -362,7 +495,7 @@ function wireWatcher() {
   // onLogStatus listener after createOverlay() kicks off startWatcher() - can still ask for the
   // current status instead of being stuck showing whatever the logdot's default markup was until
   // the next actual change (which might be a long time, or never).
-  watcher.on('status', (s) => { lastLogStatus = s; broadcast('log:status', s); });
+  watcher.on('status', (s) => { lastLogStatus = s; broadcast('log:status', s); pushGameStatus(); });
 }
 
 // ---------------- notifications ----------------
@@ -407,7 +540,7 @@ const threatsAlerted = new Set();
 // Threat/nick alerts are about scouting a Bedwars lobby; elsewhere (e.g. every Duels opponent) they'd
 // just be noise, so by default they're Bedwars-only. Unknown game type = allowed.
 function lobbyAlertsAllowed() {
-  return (getConfig().notifications || {}).bedwarsOnly === false || !currentGametype || currentGametype === 'BEDWARS';
+  return (getConfig().notifications || {}).bedwarsOnly === false || !locator.gametype || locator.gametype === 'BEDWARS';
 }
 // Blacklisted (strong tag) or sniper score at/above the threshold; never you or your party.
 function isThreat(row) {
@@ -456,11 +589,11 @@ let chatHelper = null, chatBusy = false, lastPartyWarn = 0, publicWarnIndex = 0;
 const partyWarned = new Set(), partyWarnQueue = [];
 const cwCfg = () => getConfig().chatWarn || {};
 
-// The player's own chat key from Minecraft's options.txt (next to the logs folder). LWJGL 2 key
-// codes are keyboard scan codes. Falls back to T (20).
+// The player's own chat key from Minecraft's options.txt (next to the logs folder; OneClient keeps it
+// in its shared .minecraft folder). LWJGL 2 key codes are keyboard scan codes. Falls back to T (20).
 function chatKeyScan() {
   try {
-    const opts = path.join(path.dirname(path.dirname(getConfig().logPath || '')), 'options.txt');
+    const opts = clients.optionsFile(activeLog && activeLog.path);
     const m = fs.readFileSync(opts, 'latin1').match(/^key_key\.chat:(-?\d+)/m);
     const code = m ? parseInt(m[1], 10) : 20;
     return code >= 1 && code <= 255 ? code : 20;
@@ -498,7 +631,7 @@ async function typeIntoChat(text, send) {
 function maybeWarnParty(row) {
   const c = cwCfg();
   if (!c.partyAuto || partyWarned.has(row.key)) return;
-  if (currentGametype !== 'BEDWARS' || !currentMode || inMatch) return; // Bedwars pre-game lobby only
+  if (locator.gametype !== 'BEDWARS' || !locator.mode || inMatch) return; // Bedwars pre-game lobby only
   if (![...roster.players.values()].some((r) => r.source === 'PARTY')) return; // no party, no /pc
   if (partyWarned.size >= (Number(c.maxPartyPerLobby) || 4)) return;
   partyWarned.add(row.key);
@@ -508,10 +641,11 @@ function maybeWarnParty(row) {
 // everything once the match starts or you leave.
 setInterval(async () => {
   if (chatBusy) return;
+  if (pendingLocraw) { await runLocraw(); return; }
   if (pendingDodge) { await runDodge(); return; }
   if (pendingSummary) { await runSummary(); return; }
   if (!partyWarnQueue.length) return;
-  if (inMatch || currentGametype !== 'BEDWARS' || !currentMode) { partyWarnQueue.length = 0; return; }
+  if (inMatch || locator.gametype !== 'BEDWARS' || !locator.mode) { partyWarnQueue.length = 0; return; }
   if (Date.now() - lastPartyWarn < 3500) return;
   const row = roster && roster.players.get(partyWarnQueue[0]);
   if (!row) { partyWarnQueue.shift(); return; }
@@ -530,7 +664,7 @@ const hasParty = () => [...roster.players.values()].some((r) => r.source === 'PA
 function maybeSummaryAfterStart(names) {
   const c = cwCfg();
   if (!c.partyAuto || c.afterStart === false || summaryDoneThisMatch) return;
-  if (currentGametype !== 'BEDWARS' || !inMatch) return;
+  if (locator.gametype !== 'BEDWARS' || !inMatch) return;
   summaryDoneThisMatch = true; // only the first /who of the match
   const keys = names.map((n) => String(n).toLowerCase());
   const deadline = Date.now() + 15000;
@@ -558,7 +692,7 @@ async function runSummary() {
 // second, never mid-match, never for you or your party. Off by default.
 let pendingDodge = null, dodgedThisLobby = false;
 const dodgeCfg = () => getConfig().autoDodge || {};
-function inBedwarsPregame() { return currentGametype === 'BEDWARS' && !!currentMode && !inMatch && !matchStartTimer; }
+function inBedwarsPregame() { return locator.gametype === 'BEDWARS' && locator.inGameServer && !inMatch && !matchStartTimer; }
 function maybeDodge(row) {
   const c = dodgeCfg();
   if (!c.enabled || dodgedThisLobby || pendingDodge || !inBedwarsPregame()) return;
@@ -676,23 +810,26 @@ async function decoyTick() {
     pushDecoy();
   } finally { if (gen === decoyGen) decoyBusy = false; }
 }
-function decoyOnServer(info) {
-  if (!rpc || !info || info.server === undefined) return;
-  if (info.gametype === 'BEDWARS' && info.mode) {
-    // the same game instance reporting again keeps its fake game; a new one gets a new fake
-    if (info.server !== decoyState.server || !decoyState.fake) {
-      decoyState.fake = decoy.pickDecoy({ realMode: info.mode, realMap: info.map, style: decoyCfg().style, last: decoyState.last });
+function decoyOnServer() {
+  const p = locator.place;
+  if (!rpc || p.server === undefined) return;
+  if (p.kind === 'game' && p.gametype === 'BEDWARS') {
+    // the same game instance reporting again keeps its fake game; a new one gets a new fake. A mode
+    // nobody reported yet (OneClient without the status API) can't be avoided on purpose, but by
+    // then the game has started and can't be joined anyway.
+    if (p.server !== decoyState.server || !decoyState.fake) {
+      decoyState.fake = decoy.pickDecoy({ realMode: p.mode, realMap: p.map, style: decoyCfg().style, last: decoyState.last });
       decoyState.last = decoyState.fake;
     }
   } else decoyState.fake = null;
-  decoyState.server = info.server;
+  decoyState.server = p.server;
   // a server switch in the log means the game is up - look now instead of waiting for the poll
   if (!decoyState.running) { decoyState.javaKey = null; decoyTick(); }
   else pushDecoy();
 }
 function decoyActivity() {
   if (!decoyState.running) return null;
-  return decoy.activity({ fake: decoyState.fake, startedAt: decoyState.startedAt, version: decoy.versionLabel(getConfig().logPath) });
+  return decoy.activity({ fake: decoyState.fake, startedAt: decoyState.startedAt, version: decoy.versionLabel(activeLog && activeLog.path) });
 }
 function pushDecoy() { if (rpc) rpc.setActivity(decoyActivity()); }
 
@@ -736,14 +873,14 @@ async function visibilityCheck() {
 // runtime, never bundled (it's Mojang's asset).
 const FONT_ENTRY = 'assets/minecraft/textures/font/ascii.png';
 let glyphCache = null, glyphJar = null;
+// A jar set in Settings first, then any 1.8.9 jar a client keeps (vanilla launcher, OneClient).
 function fontJarCandidates() {
   const custom = String((getConfig().nickRoller || {}).jarPath || '').trim();
-  const mc = path.join(process.env.APPDATA || '', '.minecraft', 'versions');
-  return [custom && /\.jar$/i.test(custom) ? custom : null, ...['1.8.9', '1.8.8', '1.8'].map((v) => path.join(mc, v, v + '.jar'))].filter(Boolean);
+  return [custom && /\.jar$/i.test(custom) ? custom : null, ...clients.fontJars()].filter(Boolean);
 }
 function loadGlyphs() {
   const jar = fontJarCandidates().find((p) => { try { return fs.statSync(p).isFile(); } catch (_) { return false; } });
-  if (!jar) throw new Error('Minecraft 1.8.9 font not found. Launch 1.8.9 once with the official Minecraft launcher, or set the jar path in Settings → Nick Roller.');
+  if (!jar) throw new Error('Minecraft 1.8.9 font not found. Launch 1.8.9 once with OneClient or the official Minecraft launcher, or set the jar path in Settings → Nick Roller.');
   if (glyphCache && glyphJar === jar) return glyphCache;
   const buf = readEntry(jar, FONT_ENTRY);
   if (!buf) throw new Error('That jar has no Minecraft font in it: ' + path.basename(jar));
@@ -910,7 +1047,7 @@ function registerIpc() {
     const parent = BrowserWindow.fromWebContents(e.sender);
     const r = await dialog.showOpenDialog(parent, { title: 'Select latest.log', properties: ['openFile'], filters: [{ name: 'Log', extensions: ['log', 'txt'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
-    config.save({ logPath: r.filePaths[0] }); startWatcher(); broadcastConfig();
+    config.save({ logPath: r.filePaths[0], logMode: 'manual' }); activeLog = null; startWatcher(); broadcastConfig();
     return r.filePaths[0];
   });
 
@@ -945,11 +1082,25 @@ function registerIpc() {
 
   handle('decoy:status', () => {
     const a = decoyActivity();
-    return { enabled: !!rpc, discord: !!(rpc && rpc.ready), gameRunning: decoyState.running, lunarRpcOn: decoy.lunarRpcEnabled(), details: a && a.details, state: a && a.state, startedAt: decoyState.startedAt };
+    return { enabled: !!rpc, discord: !!(rpc && rpc.ready), gameRunning: decoyState.running, lunarRpcOn: decoy.lunarRpcEnabled(), oneClientRpcOn: clients.oneClientRpcEnabled() === true, details: a && a.details, state: a && a.state, startedAt: decoyState.startedAt };
   });
 
   handle('link:open', (_e, url) => openExternalSafe(url));
   handle('log:getStatus', () => lastLogStatus);
+  handle('game:status', () => gameStatus());
+  // Every client log on this PC, for Settings -> Game Client (paths only; nothing is read).
+  handle('logs:detect', () => clients.detectLogs().map((l) => ({ client: l.client, name: l.name, label: l.label, path: l.path, mtime: l.mtime })));
+  handle('log:use', (_e, p) => {
+    const known = clients.detectLogs().find((l) => l.path === p);
+    if (p === 'auto') config.save({ logMode: 'auto' });
+    else if (known) config.save({ logMode: 'manual', logPath: known.path });
+    else return false;
+    activeLog = null; startWatcher(); broadcastConfig();
+    return true;
+  });
+  handle('update:state', () => updater.state);
+  handle('update:check', () => updater.check(true));
+  handle('update:install', () => updater.install());
 }
 
 // Name Watch rules are compiled once per change, not per player.
@@ -971,7 +1122,9 @@ function afterConfigChange(patch) {
     if (has('clickThrough')) applyClickThrough();
     if (has('window')) overlayWin.setOpacity(getConfig().window.opacity ?? 0.94);
   }
-  if (has('logPath') || has('logEnabled') || has('selfName') || has('reactNames')) startWatcher();
+  if (has('logPath') || has('logMode')) activeLog = null; // re-pick from scratch
+  if (has('logPath') || has('logMode') || has('logEnabled') || has('selfName') || has('reactNames')) startWatcher();
+  if (has('autoUpdate')) updater.configure(getConfig().autoUpdate !== false);
   if (has('selfName') || has('hideSelf')) applySelf();
   if (has('refreshSeconds')) applyRefreshTimer();
   if (has('overlayMode')) { overlayOverride = null; applyOverlayVisibility(); }
@@ -1067,12 +1220,16 @@ if (!app.requestSingleInstanceLock()) {
     setupNickRoller();
     applyFullscreenFix();
     applyDecoy();
+    updater = new Updater({ app });
+    updater.on('state', (st) => broadcast('update:state', st));
+    updater.configure(getConfig().autoUpdate !== false);
     registerIpc();
     createSplash();
     createOverlay(); // stays hidden (show:false) until the splash reports done, see finishSplash()
     buildTray();
     registerShortcuts();
     startWatcher();
+    followTimer = setInterval(followTick, 4000);
     applyRefreshTimer();
     applyNameWatch();
     applySelf(); // your own IGN, if configured, is in the list from the moment the app starts
@@ -1093,5 +1250,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray
+  // A downloaded update lands when you quit, so the next launch is already the new version.
+  app.on('before-quit', () => { if (updater && updater.state.state === 'ready') updater.install(false); });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); if (chatHelper) chatHelper.stop(); if (rpc) rpc.stop(); });
 }

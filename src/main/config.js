@@ -3,8 +3,8 @@
 // window is really just a form bound to this one object.
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { app, safeStorage } = require('electron');
+const { clientOf } = require('./clients');
 
 // Secrets are kept OUT of version control (see .gitignore + secrets.example.js).
 // Copy secrets.example.js -> secrets.js and fill in your keys. Missing file = empty
@@ -12,49 +12,7 @@ const { app, safeStorage } = require('electron');
 let secrets = {};
 try { secrets = require('./secrets'); } catch (_) {}
 
-const CONFIG_VERSION = 2;
-
-function guessLogPath() {
-  // Sensible Windows defaults. User can override in Settings.
-  const home = os.homedir();
-  const lunarProfiles = path.join(home, '.lunarclient', 'profiles');
-
-  // Lunar Client keeps one log dir per game-version profile, e.g.
-  // .lunarclient\profiles\1.8\logs\latest.log — 1.8 is where Bedwars lives, so try it first.
-  for (const v of ['1.8', '1.7', '1.21', '1.16', '1.12']) {
-    const p = path.join(lunarProfiles, v, 'logs', 'latest.log');
-    try { if (fs.existsSync(p)) return p; } catch (_) {}
-  }
-  // Fall back to scanning whatever profiles actually exist on this machine.
-  try {
-    for (const v of fs.readdirSync(lunarProfiles)) {
-      const p = path.join(lunarProfiles, v, 'logs', 'latest.log');
-      try { if (fs.existsSync(p)) return p; } catch (_) {}
-    }
-  } catch (_) {}
-
-  // Modrinth App keeps one log dir per instance too, under an arbitrary instance name -
-  // e.g. %APPDATA%\ModrinthApp\profiles\<name>\logs\latest.log - same scan idea as Lunar above.
-  try {
-    const modrinthProfiles = path.join(process.env.APPDATA || home, 'ModrinthApp', 'profiles');
-    for (const name of fs.readdirSync(modrinthProfiles)) {
-      const p = path.join(modrinthProfiles, name, 'logs', 'latest.log');
-      try { if (fs.existsSync(p)) return p; } catch (_) {}
-    }
-  } catch (_) {}
-
-  const candidates = [
-    path.join(lunarProfiles, '1.8', 'logs', 'latest.log'),
-    // Vanilla / MultiMC-style
-    path.join(process.env.APPDATA || home, '.minecraft', 'logs', 'latest.log'),
-    // Badlion
-    path.join(process.env.APPDATA || home, '.minecraft', 'logs', 'blclient', 'minecraft', 'latest.log'),
-  ];
-  for (const c of candidates) {
-    try { if (fs.existsSync(c)) return c; } catch (_) {}
-  }
-  return candidates[0];
-}
+const CONFIG_VERSION = 3;
 
 // The full set of built-in columns. Every one of these is just as removable/re-addable
 // as a custom column now — there's no "always shown" column anymore, Player included.
@@ -101,7 +59,17 @@ function defaults() {
 
     // ---- Log detection ----
     logEnabled: true,
-    logPath: guessLogPath(),
+    // 'auto': read whichever client you're playing on (Lunar, OneClient, ...), switching by itself
+    // (see clients.js). 'manual': exactly logPath.
+    logMode: 'auto',
+    logPath: '',
+    // OneClient (and most clients besides Lunar) never say which game you joined. Solar asks
+    // Hypixel's status API; if that's unavailable and party warnings / auto-dodge need to know, it
+    // sends /locraw itself once per game.
+    locrawFallback: true,
+
+    // ---- Updates (see updater.js) ----
+    autoUpdate: true,
     clearOnServerChange: true,
     clearOnLobbyJoin: true,
     // On by default - this used to be opt-in because it couldn't tell the main hub (or Bedwars'
@@ -173,12 +141,12 @@ function defaults() {
 
     // ---- Theme ----
     theme: {
-      name: 'midnight',
-      bg: '#0d1117',
-      headerBg: '#161b22',
-      text: '#e6edf3',
-      accent: '#58a6ff',
-      grid: '#21262d',
+      name: 'solar',
+      bg: '#0b0c10',
+      headerBg: '#111318',
+      text: '#eceef2',
+      accent: '#ffb547',
+      grid: '#1d2028',
     },
 
     // ---- Sniper / threat score weights (transparent & tunable) ----
@@ -336,6 +304,14 @@ function migrate(saved) {
     if (s.watchlist && typeof s.watchlist === 'object') {
       s.watchlist = Object.fromEntries(Object.entries(s.watchlist).filter(([, v]) => !(v && v.reason === 'final-killed you')));
     }
+  }
+  if ((s.version || 1) < 3) {
+    // v3 follows whichever client you play on by itself. A log path older versions guessed (or you
+    // picked) inside a known client's folder becomes auto; only a truly custom file stays pinned.
+    s.logMode = s.logPath && clientOf(s.logPath) === 'custom' ? 'manual' : 'auto';
+    // The redesign's new default theme replaces the old default - a theme you picked or tuned stays.
+    const t = s.theme;
+    if (t && typeof t === 'object' && String(t.bg).toLowerCase() === '#0d1117' && String(t.accent).toLowerCase() === '#58a6ff' && String(t.headerBg).toLowerCase() === '#161b22') delete s.theme;
   }
   s.version = CONFIG_VERSION;
   return s;
