@@ -11,14 +11,17 @@
       <div class="brand-wrap">
         <span class="logo" data-icon="logo"></span>
         <span class="brand">Solar</span>
+        <span id="status" class="status" title="Game client"><i id="logdot" class="dot"></i><span id="statusText">Starting…</span></span>
         <span id="count" class="count" title="Players tracked">0</span>
-        <span id="logdot" class="logdot" title="Log watcher"></span>
         <span id="partyChip" class="chip party hidden"><i data-icon="party"></i><b></b></span>
         <span id="threatChip" class="chip threat hidden"><i data-icon="alert"></i><b></b></span>
         <span id="rollChip" class="chip roll hidden" title="Nick roller running - click (or Alt+N) to stop"><i data-icon="dice"></i><b></b></span>
+        <span id="updateChip" class="chip update hidden" title="A new version is ready - click to restart into it"><i data-icon="download"></i><b>Update</b></span>
       </div>
+      <div class="spacer"></div>
       <div class="add">
-        <input id="addInput" placeholder="Add player…" spellcheck="false" maxlength="16" />
+        <i data-icon="search"></i>
+        <input id="addInput" placeholder="Add player" spellcheck="false" maxlength="16" />
       </div>
       <div class="btns">
         <button id="btnRefresh" data-icon="refresh" title="Refresh stats"></button>
@@ -40,7 +43,8 @@
       <div id="empty" class="empty">
         <div class="empty-icon" data-icon="logo"></div>
         <div class="empty-title">Waiting for a lobby</div>
-        <div class="empty-sub">Players appear here as you join games, party up, or add a name above.</div>
+        <div class="empty-sub">Players show up here as you join games, party up, or add a name above.</div>
+        <div id="emptyClient" class="empty-client hidden"></div>
       </div>
     </div>
 

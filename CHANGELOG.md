@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.3.0 — 2026-11-15
+
+### Added
+- **OneClient support - and Lunar keeps working.** Solar finds every Minecraft client on your PC
+  (Lunar Client, OneClient, Badlion, vanilla, Prism, Modrinth, CurseForge) and reads whichever one you
+  are playing on, switching by itself when you change clients. Settings -> Game Client shows what it
+  found and can pin one log. Existing configs move to automatic mode unless they pointed at a custom file.
+  - OneClient writes its log as UTF-8 (Lunar uses Latin-1): each log's encoding is detected from its
+    bytes, so ranks, stars and names parse correctly on both.
+  - OneClient's chat mods are understood: HyChatter's `+ (3/16) Name` joins, `- Name` quits, `⁎`
+    countdowns, `P >` / `G >` channels and `PM <` / `PM >` DMs, plus ChatTweaks' `(2)` repeat counters.
+  - Where you are without Lunar's /locraw line: Hypixel's own "Sending you to ..." and lobby-join
+    lines, the Bed Wars start banner, and (with a Hypixel key) Hypixel's status API for the exact game
+    and mode. Only when party warnings or auto-dodge need it and nothing else answered, Solar sends
+    /locraw itself once per game (Settings -> Chat & Dodge, can be turned off).
+  - Chat key from OneClient's shared options.txt, nick roller font from OneClient's 1.8.9 jar, the
+    Discord decoy's version label and game detection, and a warning when OneClient's own Discord
+    status is on.
+- **Automatic updates.** Solar checks GitHub on launch and every few hours, downloads quietly and
+  installs when you click Restart (overlay title bar / Settings -> About) or when you quit - never
+  mid-game by itself. Each release's checksums are signed with an Ed25519 release key; a download is
+  installed only if signature and hash both match.
+- **Your IGN fills itself in** from the game log the first time you play.
+- The overlay's title bar shows which client is being read and where you are ("OneClient · Doubles pre-game").
+
+### Changed
+- **Redesigned UI.** New default theme (near-black with one warm accent; the old one is still there as
+  *midnight*), a cleaner overlay with calmer stat colours, a status pill, loading shimmer, new players
+  briefly highlighted, richer hover cards and pill toasts. Settings has a grouped sidebar, a Game
+  Client page and an About page with updates. Notification popups and the blacklist window match.
+- **New launch animation** ("Sunrise"): a spark becomes the sun, an orbit breaks into the Solar rays,
+  the wordmark wipes in and the client Solar found is shown - 3.6s instead of 6s, with a matching
+  short sound.
+- Chat from titled players ("Bridge Legend V [MVP++] Name: ...") now counts for mentions; system lines
+  like "Opponent: ..." or "Winner: ..." no longer count as someone talking.
+- Join lines in any game's pre-game lobby are ignored (Hypixel scrambles them outside Bed Wars too).
+
 ## 1.2.9 — 2026-10-31
 
 ### Added

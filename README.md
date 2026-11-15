@@ -6,6 +6,9 @@ Zero runtime dependencies (just Electron), live Hypixel stats, a self-hosted **s
 and a full settings + admin UI. Every column can be added, removed, reordered, and re-sourced —
 nothing about the layout is fixed.
 
+Works with **Lunar Client and OneClient** (and Badlion, vanilla, Prism, Modrinth, CurseForge) — Solar
+follows whichever client you play on, no setup — and **updates itself** from the GitHub releases.
+
 ---
 
 ## Quick start
@@ -38,15 +41,16 @@ system tray.
 | `Alt+N` | Start / stop the nick roller |
 | `Alt+W` | Type a warning about the next flagged player into chat (not sent - you press Enter) |
 | `Alt+T` | Test notification in-game (+ visibility diagnostics) |
-| `Alt+N` | Start / stop the nick roller |
 
 ---
 
 ## First-time setup (Settings — `Alt+S` or the ⚙ button)
 
-1. **General → Your IGN.** Set your username so the overlay knows who "you" are (mentions, hide-self).
-2. **Log & Detection → Log file path.** Point it at your client log and click *Browse…*.
-   Default guesses cover Lunar (`.lunarclient/profiles/<version>/logs/latest.log`, 1.8 first), vanilla, and Badlion.
+1. **Nothing to do for your game client.** Solar finds Lunar Client, OneClient, Badlion, vanilla and
+   launcher instances (Prism, Modrinth, CurseForge) by itself and reads whichever one you are playing
+   on; switch clients any time. **Game Client** shows what it found and lets you pin one log if you
+   run two clients at once.
+2. **General → Your IGN** fills itself in from your game log the first time you play.
    Players are auto-added when you `/who`, join a party, get invites/DMs, or get mentioned in chat —
    all of that is on by default, nothing to flip on manually.
 3. **API Keys → Hypixel key.** Paste your key and hit **Test** to confirm it.
@@ -192,14 +196,41 @@ Messages show the full tag and reason, fit the 100-character chat limit, and hav
 characters removed. Solar only types while Minecraft has been focused for a moment, waits for you to
 let go of keys, re-checks focus before every key, and restores your clipboard.
 
+### Lunar Client & OneClient (Settings → Game Client)
+Solar reads the client's `latest.log` and follows whichever one is being written to, so moving between
+Lunar and OneClient needs no settings change. Everything works on both:
+
+- **Encoding.** Lunar writes the log in Latin-1, OneClient in UTF-8; each file's encoding is detected
+  from its own bytes, so ranks, stars and names parse correctly on either.
+- **OneClient's chat mods.** HyChatter restyles Hypixel lines before they reach the log (game joins as
+  `+ (3/16) Name`, quits as `- Name`, countdowns with `⁎`, short `P >` / `G >` channels, `PM <` DMs) and
+  ChatTweaks adds `(2)` to repeated lines. Both styles are understood everywhere.
+- **Which game you're in.** Lunar reports it itself (its `/locraw` line). On OneClient Solar reads
+  Hypixel's own "Sending you to …" and lobby-join lines, and with a Hypixel key asks Hypixel's status
+  API for your exact game and mode (your Online Status must be visible in Hypixel's API settings).
+  Only if that can't answer **and** party warnings or auto-dodge are on does Solar send `/locraw`
+  itself, once per game (Settings → Chat & Dodge).
+- **Everything else** — chat key, nick roller font (OneClient's 1.8.9 jar works), F11 fix, Discord
+  decoy (with a warning if OneClient's own Discord status is on) — uses the active client.
+
+### Updates
+Solar checks GitHub on launch and every few hours, downloads new versions in the background and
+installs them when you click **Restart to update** (overlay title bar or Settings → About) or the next
+time you quit — never mid-game on its own. Portable copies replace themselves in place; installed copies
+run the new installer silently. Every release's `SHA256SUMS.txt` is signed with Solar's release key
+(Ed25519; only the public key ships in the app) and a download is only installed if the signature and
+its hash both check out — someone with access to the GitHub repo still couldn't push code to your PC.
+Turn it off in Settings → About.
+
 ### Discord decoy (Settings → Discord Decoy)
 Off by default. Shows a fake **Lunar Client** status on your Discord profile, using the real Lunar
 Discord app, icons and wording (e.g. *Playing Bed Wars on Hypixel · 4v4v4v4 on Lectus*), but only ever
 with Bed Wars games you are **not** in. When you join a Bedwars game, the decoy swaps to a new fake game
 at that same moment, in a different mode (or, if you choose, your mode) and never on your map. A sniper
 reading your status queues into the wrong game. Lobbies show Lunar's plain *Playing Hypixel*, and the
-status clears when Minecraft closes. Keep Lunar's own Discord Rich Presence **off** (Settings warns you
-if it's on); otherwise it shows your real game next to the decoy.
+status clears when Minecraft closes. Works whichever client you play on. Keep Lunar's own Discord Rich
+Presence and OneClient's Discord RPC **off** (Settings warns you if either is on); otherwise they show
+next to the decoy.
 
 ### Overlay modes & F11
 **Settings → Appearance → When to show the overlay:** *Auto* (lobbies + Bedwars pre-game; hidden in
@@ -219,7 +250,7 @@ entirely. It also avoids GPU-heavy effects (backdrop blurs) and only touches win
 capture-exclusion state when those settings actually change.
 
 ### Appearance
-Six built-in themes plus full custom colors, window opacity, font size, row height, always-on-top,
+Seven built-in themes (the default *Solar*: near-black with one warm accent) plus full custom colors, window opacity, font size, row height, always-on-top,
 click-through, and the row highlight settings above.
 
 ---
@@ -238,6 +269,8 @@ click-through, and the row highlight settings above.
   to `localhost`). Every request has a timeout.
 - **Hardened binary.** Release builds ship with Electron fuses set: no run-as-Node, no
   `NODE_OPTIONS`/inspector flags, and asar integrity validation.
+- **Signed updates.** The updater only installs downloads whose hash is listed in an Ed25519-signed
+  `SHA256SUMS.txt`, fetched over HTTPS from GitHub's own hosts. The signing key never enters the repo.
 
 ## Project layout
 
@@ -254,7 +287,10 @@ solar-overlay/
    │  ├─ hypixel.js            # Hypixel + Mojang, cache, rate-limit, daily snapshots
    │  ├─ stats.js              # star/FKDR/WLR/monthly + sniper score (pure, tested)
    │  ├─ urchin.js             # Urchin + Connections + local blacklist merge + admin add-tag
-   │  ├─ logWatcher.js         # tails the client log, parses chat + party events
+   │  ├─ clients.js            # finds every client log (Lunar, OneClient, ...) and picks the active one
+│  ├─ logWatcher.js         # tails the client log (Latin-1 or UTF-8), parses chat + party events
+│  ├─ location.js           # where you are: /locraw, status API and chat merged into one place
+│  ├─ updater.js            # signed auto-updates from GitHub releases
    │  ├─ net.js                # request timeouts + https-only endpoint guard
    │  ├─ nameRules.js          # Name Watch / nick rule parsing + matching
    │  ├─ nickRoller.js         # nick roller loop + requirements
@@ -266,6 +302,8 @@ solar-overlay/
    └─ renderer/
       ├─ overlay/              # the overlay window
       ├─ settings/             # tabbed settings
+      ├─ splash/               # launch animation
+      ├─ notify/               # corner notification popups
       └─ blacklist/            # admin add-tag UI
 ```
 
@@ -283,7 +321,9 @@ git grep -nE "key=[0-9a-fA-F]{8}-" $(git rev-parse HEAD) || echo "no embedded ke
 - Double-check the Urchin tag shape on your own machine — the parser is defensive and follows the
   documented `{ score:{value,mode}, tags:[…] }` format, but if your instance returns extra fields
   you want shown, they're easy to surface in `urchin.js → _parseTag`.
-- To package the Windows installer + portable `.exe`: `npm run dist` (output in `dist/`).
+- To package the Windows installer + portable `.exe`: `npm run dist` (output in `dist/`), then
+  `node scripts/sign-release.js` to write the signed `SHA256SUMS.txt` + `.sig` the updater needs
+  (reads the private key from `SOLAR_SIGNING_KEY`, default `~/.solar-overlay-release/signing-key.pem`).
 - For development against a throwaway profile (never touches your real config/keys):
   `SOLAR_USER_DATA=./.devprofile npm start` — ignored in packaged builds.
 - Log formats vary by client. If detection misses something, paste a sample line and the regexes in

@@ -32,6 +32,14 @@ t('a Latin-1 log is decoded as Latin-1 (Lunar)', () => {
   assert.strictEqual(st.encoding, 'latin1');
   assert.strictEqual(lines[0], '[§6] A');
 });
+t('one stray byte does not garble the rest of a UTF-8 log', () => {
+  const st = { encoding: null };
+  decodeLines(Buffer.from('[CHAT] §aok\n', 'utf8'), st);
+  const bad = Buffer.concat([Buffer.from('junk '), Buffer.from([0xff]), Buffer.from('\n[CHAT] §7[3✫] Name: hi\n', 'utf8')]);
+  const { lines } = decodeLines(bad, st);
+  assert.strictEqual(lines[1], '[CHAT] §7[3✫] Name: hi');
+  assert.strictEqual(st.encoding, 'utf8');
+});
 t('a multi-byte character split across reads is not mangled', () => {
   const w = new LogWatcher(); w.setSelfNames(['Me']);
   const got = [];
@@ -184,9 +192,11 @@ t('the Bed Wars banner settles an unknown game', () => {
 });
 t('describe() reads well', () => {
   assert.strictEqual(describe({ kind: 'lobby', gametype: 'BEDWARS' }, false), 'Bed Wars lobby');
-  assert.strictEqual(describe({ kind: 'game', gametype: 'BEDWARS', mode: 'X' }, false, { X: { name: 'Doubles' } }), 'Bed Wars Doubles · pre-game');
-  assert.strictEqual(describe({ kind: 'game', gametype: null }, true), 'Game');
+  assert.strictEqual(describe({ kind: 'game', gametype: 'BEDWARS', mode: 'X' }, false, { X: { name: 'Doubles' } }), 'Doubles pre-game');
+  assert.strictEqual(describe({ kind: 'game', gametype: 'BEDWARS', mode: 'X' }, true, { X: { name: 'Doubles' } }), 'Bed Wars Doubles');
+  assert.strictEqual(describe({ kind: 'game', gametype: null }, true), 'In game');
   assert.strictEqual(describe({ kind: 'unknown' }, false), null);
+  assert.strictEqual(describe({ kind: 'game', gametype: null }, false), 'Pre-game');
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

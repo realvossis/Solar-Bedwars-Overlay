@@ -1,25 +1,26 @@
-#panel{padding:20px 24px}
-.warn{background:#4a1c1c;border:1px solid #da3633;border-radius:6px;padding:9px 12px;font-size:12px;margin-bottom:16px}
+#panel{padding:24px 28px}
+#panel>*{max-width:560px}
+h2{font-size:15px}
+.warn{display:block;background:color-mix(in srgb,var(--bad) 9%,transparent);border:1px solid color-mix(in srgb,var(--bad) 32%,transparent);
+  border-radius:10px;padding:10px 13px;font-size:12px;margin-bottom:18px;color:color-mix(in srgb,var(--text) 85%,var(--bg))}
 .lookup{display:flex;gap:8px;margin-bottom:12px}
-.lookup input{flex:1;background:var(--bg);border:1px solid var(--grid);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;outline:none}
-.lookup input:focus{border-color:var(--accent)}
+.lookup input{flex:1;width:auto}
 #lookResult{font-size:12px;margin-bottom:8px}
-.card{background:var(--header);border:1px solid var(--grid);border-radius:8px;padding:12px;margin-top:8px}
-.card .nm{font-weight:600;font-size:14px}
-.tagline{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-top:1px solid var(--grid);margin-top:6px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:13px 15px;margin-top:8px}
+.card .nm{font-weight:650;font-size:14px}
+.tagline{display:flex;gap:8px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line);margin-top:7px}
 .tagchip{display:inline-flex;align-items:center;justify-content:center;width:20px;height:16px;
-  padding:0;border-radius:4px;color:#0d1117;flex:0 0 auto}
+  padding:0;border-radius:4px;color:#0b0c10;flex:0 0 auto}
 .tagchip svg{display:block}
 .tagchip.plain{background:transparent}
-.form{display:flex;flex-direction:column;gap:6px;max-width:460px}
-.form label{font-size:12px;color:var(--muted);margin-top:6px}
-.form input[type=text],.form select,.form textarea{background:var(--bg);border:1px solid var(--grid);color:var(--text);border-radius:6px;padding:8px 10px;font-size:13px;outline:none;font-family:inherit;width:100%}
-.form textarea{height:64px;resize:vertical}
-.form input:focus,.form select:focus,.form textarea:focus{border-color:var(--accent)}
-.hint{color:var(--muted);font-size:11px;font-weight:400}
-.checks{display:flex;gap:18px;margin:10px 0}
-.cb{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text)}
+.form{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px 16px}
+.form label{font-size:11px;color:var(--faint);margin-top:6px;font-weight:650;text-transform:uppercase;letter-spacing:.6px}
+.form input[type=text],.form select,.form textarea{width:100%}
+.form textarea{height:70px}
+.hint{color:var(--faint);font-size:11px;font-weight:400;text-transform:none;letter-spacing:0}
+.checks{display:flex;gap:18px;margin:10px 0 4px}
+.form .cb{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);text-transform:none;letter-spacing:0;font-weight:500;margin:0}
 .cb input{accent-color:var(--accent)}
-.big{padding:10px;font-size:14px;margin-top:6px}
+.big{height:36px;justify-content:center;font-size:13px;margin-top:8px}
 #result{font-size:12px;margin-top:10px;min-height:18px}
 .dim{color:var(--muted)}

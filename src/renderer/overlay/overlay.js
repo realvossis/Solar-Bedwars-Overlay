@@ -24,7 +24,7 @@ const ACTIONS_COL_WIDTH = 22;
 const RANKCOLOR = {
   SUPERSTAR: '#ffaa00', MVP_PLUS: '#55ffff', MVP: '#55ffff', SUPERSTAR_PLUS: '#ffaa00',
   VIP_PLUS: '#55ff55', VIP: '#55ff55', YOUTUBER: '#ff5555', ADMIN: '#ff5555', HELPER: '#5555ff',
-  MODERATOR: '#00aa00', GAME_MASTER: '#00aa00', NONE: 'var(--text)',
+  MODERATOR: '#00aa00', GAME_MASTER: '#00aa00', NONE: 'color-mix(in srgb,var(--text) 72%,var(--bg))',
 };
 // How a player actually ended up on the list — shown as a small badge next to their name so it's
 // obvious at a glance whether this is just someone in your game, or someone who invited/DM'd/
@@ -98,8 +98,10 @@ let rows = [];
 const $ = (s) => document.querySelector(s);
 const el = (t, c) => { const e = document.createElement(t); if (c) e.className = c; return e; };
 
-function fkdrColor(v){ if(v>=10)return'#ff2d55'; if(v>=6)return'#ff6b35'; if(v>=3)return'#ffb454'; if(v>=1)return'#7ee787'; return'#8b949e'; }
-function wlrColor(v){ if(v>=5)return'#ff6b35'; if(v>=2)return'#ffb454'; if(v>=1)return'#7ee787'; return'#8b949e'; }
+// Five calm tiers: below average fades back, average is plain text, then warm -> hot.
+function tier(v, a, b, c, d){ return v>=d?'#ff5d5d': v>=c?'#ff8a4c': v>=b?'#f5c451': v>=a?'var(--text)':'var(--faint)'; }
+function fkdrColor(v){ return tier(v, 1, 3, 6, 10); }
+function wlrColor(v){ return tier(v, 1, 2, 3.5, 5); }
 function relTime(ts){ if(!ts)return'—'; const s=(Date.now()-ts)/1000;
   if(s<60)return Math.floor(s)+'s'; const m=s/60; if(m<60)return Math.floor(m)+'m';
   const h=m/60; if(h<24)return Math.floor(h)+'h'; const d=h/24; if(d<30)return Math.floor(d)+'d';
@@ -131,11 +133,11 @@ function filteredTags(row, connId){
 function applyTheme(){
   const t = cfg.theme || {};
   const r = document.documentElement.style;
-  r.setProperty('--bg', t.bg || '#0d1117');
-  r.setProperty('--header', t.headerBg || '#161b22');
-  r.setProperty('--text', t.text || '#e6edf3');
-  r.setProperty('--accent', t.accent || '#58a6ff');
-  r.setProperty('--grid', t.grid || '#21262d');
+  r.setProperty('--bg', t.bg || '#0b0c10');
+  r.setProperty('--header', t.headerBg || '#111318');
+  r.setProperty('--text', t.text || '#eceef2');
+  r.setProperty('--accent', t.accent || '#ffb547');
+  r.setProperty('--grid', t.grid || '#1d2028');
   r.setProperty('--font', (cfg.fontSize || 13) + 'px');
   r.setProperty('--row', (cfg.rowHeight || 22) + 'px');
   $('#btnClick').classList.toggle('on', !!cfg.clickThrough);
@@ -181,7 +183,7 @@ function renderHead(){
     th.title = meta.label;
     if(meta.num) th.classList.add('num');
     if(cfg.sortBy===col.key) th.classList.add('sorted');
-    th.innerHTML = (iconCol ? '' : esc(meta.label)) + (cfg.sortBy===col.key ? `<span class="arrow">${cfg.sortDir==='desc'?'▼':'▲'}</span>` : '');
+    th.innerHTML = (iconCol ? '' : esc(meta.label)) + (cfg.sortBy===col.key ? `<span class="arrow ${cfg.sortDir==='desc'?'desc':'asc'}"></span>` : '');
     th.onclick = ()=>{ const d = cfg.sortBy===col.key ? (cfg.sortDir==='desc'?'asc':'desc') : (meta.num?'desc':'asc');
       save({ sortBy: col.key, sortDir: d }); };
     th.oncontextmenu = (e)=>{ e.preventDefault(); columnMenu(e.clientX, e.clientY); };
@@ -212,7 +214,7 @@ function columnMenu(x,y){
   for(const key of keys){
     const c = cfg.columns.find(k=>k.key===key) || {key,visible:true,order:99};
     const it = el('div','item');
-    it.innerHTML = `<span>${esc(colMeta(key).label)}</span><span>${c.visible?'✓':''}</span>`;
+    it.innerHTML = `<span>${esc(colMeta(key).label)}</span><span class="ck">${c.visible?'✓':''}</span>`;
     it.onclick = ()=>{ const cols = cfg.columns.some(k=>k.key===key) ? cfg.columns.map(k=>k.key===key?{...k,visible:!k.visible}:k) : [...cfg.columns, {key, visible:false, order:cfg.columns.length}];
       hideCtx(); save({ columns: cols }); };
     menu.appendChild(it);
@@ -277,7 +279,7 @@ function sorted(){
 // ---------------- row rendering ----------------
 function cell(row, key){
   const td = el('td'); const s = row.stats, sn = row.sniper, u = row.urchin;
-  if(row.loading && !s && key!=='name' && key!=='source'){ td.innerHTML='<span class="loading">…</span>'; return td; }
+  if(row.loading && !s && key!=='name' && key!=='source' && key!=='tag'){ td.className='mono'; td.innerHTML='<span class="loading"></span>'; return td; }
   const override = (cfg.columnSources||{})[key];
   if(override && key!=='tag' && key!=='bl' && override.path){
     const v = sourceValue(row, override.source, override.path);
@@ -310,7 +312,7 @@ function cell(row, key){
       else if(row.apiError){ td.innerHTML=`${esc(row.name)} <span class="err">${esc(row.apiError)}</span>${denick}`; }
       else {
         const col = RANKCOLOR[(s&&s.rank)||'NONE']||'var(--text)';
-        td.innerHTML=`<span style="color:${col}">${esc(row.name)}</span>${denick}` + (row.loading?' <span class="loading">…</span>':'');
+        td.innerHTML=`<span style="color:${col}">${esc(row.name)}</span>${denick}`;
       }
       return td;
     }
@@ -359,10 +361,15 @@ function render(){
   $('#count').textContent = rows.length;
   renderSummary();
   $('#empty').classList.toggle('hidden', rows.length>0);
+  $('#tableWrap').classList.toggle('is-empty', !rows.length);
   const cols = orderedColumns();
   const hlStat = cfg.highlightEnabled !== false ? cfg.highlightStat : null;
+  const now = new Set();
   for(const row of list){
     const tr = el('tr');
+    // A player who just appeared gets a brief accent wash so new arrivals catch the eye.
+    now.add(row.key);
+    if(seenKeys && !seenKeys.has(row.key)) tr.classList.add('fresh');
     if(blCount(row)>0) tr.classList.add('bl');
     if(row.nicked) tr.classList.add('nicked');
     if(row.source==='SELF' || row.source==='PARTY') tr.classList.add('team');
@@ -380,7 +387,9 @@ function render(){
     tr.onmouseleave = hideTip;
     body.appendChild(tr);
   }
+  seenKeys = now;
 }
+let seenKeys = null; // null until the first render, so the initial list doesn't all flash
 
 // Title-bar chips: how many real threats are in the lobby, and how big your tracked party is -
 // the two things worth knowing before even reading the table.
@@ -408,30 +417,33 @@ function showTip(e,row){
   const nw = row.nameMatch && row.nameMatch.length;
   if(!s && !(u&&u.tags&&u.tags.length) && !row.denickHint && !row.nicked && !nw) return;
   tipEl = el('div','tip');
-  let html = `<div class="row"><b>${esc(row.displayName||row.name)}</b></div>`;
+  const nameCol = row.nicked ? 'var(--nick)' : (RANKCOLOR[(s&&s.rank)||'NONE']||'var(--text)');
+  let html = `<div class="t-name"><span style="color:${s?s.starColorHex:'inherit'}">${s?s.star+'✫ ':''}</span><span style="color:${nameCol}">${esc(row.displayName||row.name)}</span>`
+    + (sn && s ? ` <span class="snlabel" style="color:${sn.color};margin-left:4px">${sn.label} ${sn.score}</span>` : '') + `</div>`;
   if(row.nicked){
-    html += `<div class="row" style="color:#22d3ee"><b>Nicked — real identity unknown</b></div>`;
+    html += `<div class="row" style="color:var(--nick)"><b>Nicked — real identity unknown</b></div>`;
     if(row.nickReason) html += `<div class="row dim">Why: ${esc(row.nickReason)}</div>`;
   }
   if(nw){
-    html += `<div class="row" style="color:#bc8cff"><b>Name Watch:</b> ${esc(row.nameMatch.join(', '))}</div>`;
+    html += `<div class="row" style="color:var(--watch)"><b>Name Watch:</b> ${esc(row.nameMatch.join(', '))}</div>`;
   }
   if(s){
-    html += `<div class="row">${s.star}✫ · FKDR ${s.fkdr.toFixed(2)} · WLR ${s.wlr.toFixed(2)} · WS ${s.winstreak==null?'?':s.winstreak}</div>`;
-    html += `<div class="row dim">Finals ${fmt(s.finalKills)}/${fmt(s.finalDeaths)} · Wins ${fmt(s.wins)} · Games ${fmt(s.gamesPlayed)}</div>`;
-    if(s.mfkdr!=null) html += `<div class="row dim">Monthly FKDR ${s.mfkdr.toFixed(2)} (${fmt(s.mFinals)} finals tracked)</div>`;
-    html += `<div class="row dim">Network Lv ${s.networkLevel} · Last login ${relTime(s.lastLogin)} ago</div>`;
-    if(sn) html += `<div class="row"><b style="color:${sn.color}">${sn.label} ${sn.score}/100</b></div>`;
+    const g = [['FKDR', `<span style="color:${fkdrColor(s.fkdr)}">${s.fkdr.toFixed(2)}</span>`], ['WLR', `<span style="color:${wlrColor(s.wlr)}">${s.wlr.toFixed(2)}</span>`],
+      ['Finals', fmt(s.finalKills)], ['WS', s.winstreak==null?'?':s.winstreak], ['Wins', fmt(s.wins)], ['Games', fmt(s.gamesPlayed)],
+      ['M.FKDR', s.mfkdr==null?'—':s.mfkdr.toFixed(2)], ['Lvl', s.networkLevel]];
+    html += `<div class="t-grid">${g.map(([k,v])=>`<div><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}</div>`;
+    html += `<div class="row dim">Last login ${relTime(s.lastLogin)} ago${s.mfkdr!=null?` · ${fmt(s.mFinals)} finals this month`:''}</div>`;
   }
   if(u && u.tags && u.tags.length){
-    html += `<div class="row" style="margin-top:4px"><b>Blacklist tags</b></div>`;
+    html += `<div class="t-sec"><div class="row"><b>Blacklist tags</b></div>`;
     for(const t of u.tags.slice(0,6)){
-      html += `<div class="row">${tagChip(t, t.label || t.type)} <b>${esc(t.label || t.type)}</b> ${esc((t.reason||'').slice(0,90))} <span class="dim">[${esc(t.source)}]</span></div>`;
+      html += `<div class="row">${tagChip(t, t.label || t.type)} <b>${esc(t.label || t.type)}</b> ${esc((t.reason||'').slice(0,90))} <span class="dim">· ${esc(t.source)}</span></div>`;
     }
+    html += `</div>`;
   }
   if(row.denickHint && row.denickHint.candidates && row.denickHint.candidates.length){
-    html += `<div class="row" style="margin-top:4px"><b>Possibly nicked</b></div>`;
-    html += `<div class="row dim">Final-kill count #${row.denickHint.count} matches: ${esc(row.denickHint.candidates.map(c=>c.name).join(', '))} (not certain — right-click to add)</div>`;
+    html += `<div class="t-sec"><div class="row"><b>Possibly nicked</b></div>`;
+    html += `<div class="row dim">Final-kill count #${row.denickHint.count} matches: ${esc(row.denickHint.candidates.map(c=>c.name).join(', '))} (not certain — right-click to add)</div></div>`;
   }
   tipEl.innerHTML = html;
   document.body.appendChild(tipEl);
@@ -455,32 +467,30 @@ function rowMenu(x,y,row){
   hideTip();
   const m=$('#ctx'); m.innerHTML='';
   const head=el('div','head'); head.textContent=row.name; m.appendChild(head);
-  const add=(label,fn)=>{ const it=el('div','item'); it.textContent=label; it.onclick=()=>{hideCtx();fn();}; m.appendChild(it); };
+  const add=(label,fn,cls)=>{ const it=el('div','item'+(cls?' '+cls:'')); it.textContent=label; it.onclick=()=>{hideCtx();fn();}; m.appendChild(it); };
   add('Open on Plancke ↗', ()=> row.uuid && api.openLink('https://plancke.io/hypixel/player/stats/'+row.uuid));
   add('Open on NameMC ↗', ()=> row.uuid && api.openLink('https://namemc.com/profile/'+row.uuid));
   add('Copy username', ()=> navigator.clipboard.writeText(row.name));
   m.appendChild(el('div','sep'));
-  add('＋ Local info tag…', ()=> tagModal(row));
-  add('⚑ Flag to watchlist', ()=> api.addWatchlist(row.name, 'manual flag'));
-  if(row.uuid) add('⚑ Add to Urchin (admin)…', ()=> api.openBlacklist());
+  add('Add local info tag…', ()=> tagModal(row));
+  add('Flag to watchlist', ()=> api.addWatchlist(row.name, 'manual flag'));
+  if(row.uuid) add('Add to Urchin (admin)…', ()=> api.openBlacklist());
   if(row.denickHint && row.denickHint.candidates && row.denickHint.candidates.length){
     m.appendChild(el('div','sep'));
-    for(const c of row.denickHint.candidates) add(`≈? Add suggested identity: ${c.name}`, ()=> api.addPlayer(c.name));
+    for(const c of row.denickHint.candidates) add(`Add suggested identity: ${c.name}`, ()=> api.addPlayer(c.name));
   }
   m.appendChild(el('div','sep'));
-  add('✕ Remove from list', ()=> api.removePlayer(row.uuid||row.name));
+  add('Remove from list', ()=> api.removePlayer(row.uuid||row.name), 'danger');
   showCtx(x,y);
 }
 
 // ---------------- mini modal (Electron disables prompt) ----------------
 function tagModal(row){
-  const back = el('div'); back.style.cssText='position:fixed;inset:0;background:#0008;z-index:80;display:flex;align-items:center;justify-content:center';
-  const box = el('div'); box.style.cssText='background:var(--header);border:1px solid var(--grid);border-radius:8px;padding:14px;width:280px';
-  box.innerHTML = `<div style="font-weight:600;margin-bottom:8px">Local info tag — ${esc(row.name)}</div>
-    <input id="mReason" placeholder="reason" style="width:100%;padding:6px;background:var(--bg);border:1px solid var(--grid);color:var(--text);border-radius:5px;outline:none">
-    <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px">
-      <button id="mCancel" style="padding:5px 10px">Cancel</button>
-      <button id="mOk" style="padding:5px 10px;background:var(--accent);color:#fff;border:none;border-radius:5px">Add</button></div>`;
+  const back = el('div','modal-back');
+  const box = el('div','modal');
+  box.innerHTML = `<div class="m-title">Local info tag · ${esc(row.name)}</div>
+    <input id="mReason" placeholder="Reason" maxlength="200">
+    <div class="m-btns"><button id="mCancel">Cancel</button><button id="mOk" class="primary">Add tag</button></div>`;
   back.appendChild(box); document.body.appendChild(back);
   const inp=box.querySelector('#mReason'); inp.focus();
   const close=()=>back.remove();
@@ -494,7 +504,29 @@ function tagModal(row){
 function toast(t){
   const d=el('div','toast '+(t.kind==='warn'?'warn':t.kind==='err'?'err':''));
   d.textContent=t.msg; $('#toasts').appendChild(d);
-  setTimeout(()=>{ d.style.opacity='0'; setTimeout(()=>d.remove(),300); }, 3200);
+  while($('#toasts').children.length>3) $('#toasts').firstChild.remove();
+  setTimeout(()=>{ d.classList.add('gone'); setTimeout(()=>d.remove(),300); }, 3400);
+}
+
+// ---------------- client / location status ----------------
+// "OneClient · Bed Wars lobby": which client's log is being read, and where you are on Hypixel.
+function renderStatus(st){
+  if(!st) return;
+  const dot=$('#logdot'), text=$('#statusText'), pill=$('#status');
+  const ok = st.log && st.log.ok;
+  dot.className = 'dot ' + (ok ? 'ok' : st.clientName ? 'wait' : '');
+  const where = st.place && st.place.label;
+  text.innerHTML = st.clientName ? `<b>${esc(st.clientName)}</b>${where ? ' · ' + esc(where) : ok ? '' : ' · waiting'}` : esc((st.log && st.log.msg) || 'No client found');
+  pill.title = st.clientName ? `${st.label}\n${st.path}\n${st.mode==='auto' ? 'Follows whichever client you play on' : 'Fixed log file (Settings → Game Client)'}` : 'No Minecraft client log found yet - start your game, or pick the log in Settings → Game Client';
+  const ec = $('#emptyClient');
+  ec.classList.toggle('hidden', !st.clientName);
+  if(st.clientName) ec.innerHTML = `<i class="dot ${ok?'ok':'wait'}"></i>Reading ${esc(st.label || st.clientName)}`;
+}
+function renderUpdate(u){
+  const chip=$('#updateChip');
+  const ready = u && u.state==='ready';
+  chip.classList.toggle('hidden', !ready);
+  if(ready) chip.title = `Solar ${u.latest} is ready - click to restart into it (or it installs when you quit)`;
 }
 
 // ---------------- save/load ----------------
@@ -511,12 +543,13 @@ async function init(){
   api.onRoster((list)=>{ rows=list; render(); });
   api.onConfigChanged((c)=>{ cfg=c; applyAll(); });
   api.onToast(toast);
-  api.onLogStatus((s)=> $('#logdot').classList.toggle('ok', !!s.ok));
-  // The log watcher's first status event fires as soon as startWatcher() runs at boot - often
-  // before this script has even finished loading and reached the onLogStatus call above, so that
-  // first push is missed entirely and the dot would otherwise show "disconnected" forever even
-  // though it's actually fine. Pull the current status once directly to cover that gap.
-  api.getLogStatus().then((s)=> $('#logdot').classList.toggle('ok', !!s.ok));
+  api.onGameStatus(renderStatus);
+  // The first status push fires as soon as the watcher starts at boot - often before this script
+  // has loaded and registered the listener above - so pull the current status once directly.
+  api.getGameStatus().then(renderStatus);
+  api.onUpdateState(renderUpdate);
+  api.getUpdateState().then(renderUpdate);
+  $('#updateChip').onclick=()=>api.installUpdate();
 
   $('#btnSettings').onclick=()=>api.openSettings();
   $('#btnBlacklist').onclick=()=>api.openBlacklist();

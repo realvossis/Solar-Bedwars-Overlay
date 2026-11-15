@@ -7,16 +7,46 @@
 </head>
 <body>
   <div id="card">
-    <canvas id="space"></canvas>
-    <div id="vignette"></div>
+    <div id="glow"></div>
+    <svg id="mark" viewBox="-60 -60 120 120" aria-hidden="true">
+      <defs>
+        <radialGradient id="core" cx="40%" cy="38%" r="70%">
+          <stop offset="0" stop-color="#fff6e2" />
+          <stop offset=".45" stop-color="#ffd27a" />
+          <stop offset="1" stop-color="#ff8a3d" />
+        </radialGradient>
+        <!-- user space: a bounding-box gradient paints nothing on a perfectly straight (zero-width) line -->
+        <radialGradient id="ray" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="44">
+          <stop offset=".6" stop-color="#ffd27a" />
+          <stop offset="1" stop-color="#ff8a3d" />
+        </radialGradient>
+        <radialGradient id="halo">
+          <stop offset="0" stop-color="#ffb547" stop-opacity=".55" />
+          <stop offset=".5" stop-color="#ff8a3d" stop-opacity=".14" />
+          <stop offset="1" stop-color="#ff8a3d" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <circle id="bloom" r="56" fill="url(#halo)" />
+      <circle id="orbit" r="31" pathLength="100" />
+      <g id="rays">
+        <line class="r" x1="0" y1="-29" x2="0" y2="-43" />
+        <line class="r" x1="20.5" y1="-20.5" x2="30.4" y2="-30.4" />
+        <line class="r" x1="29" y1="0" x2="43" y2="0" />
+        <line class="r" x1="20.5" y1="20.5" x2="30.4" y2="30.4" />
+        <line class="r" x1="0" y1="29" x2="0" y2="43" />
+        <line class="r" x1="-20.5" y1="20.5" x2="-30.4" y2="30.4" />
+        <line class="r" x1="-29" y1="0" x2="-43" y2="0" />
+        <line class="r" x1="-20.5" y1="-20.5" x2="-30.4" y2="-30.4" />
+      </g>
+      <circle id="sun" r="18" fill="url(#core)" />
+      <circle id="spark" r="2.6" fill="#fffaf0" />
+    </svg>
     <div id="title">
-      <div id="word" aria-label="Solar"><span>S</span><span>O</span><span>L</span><span>A</span><span>R</span></div>
+      <div id="word">Solar</div>
       <div id="sub">Bedwars Overlay</div>
+      <div id="status"><i></i><span></span></div>
     </div>
-    <div id="foot">
-      <span id="ver"></span>
-      <span id="credit">by vossis_YT</span>
-    </div>
+    <div id="foot"><span id="ver"></span><span>by vossis</span></div>
     <div id="progress"><div id="bar"></div></div>
   </div>
   <script src="splash.js"></script>

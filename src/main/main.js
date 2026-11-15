@@ -131,12 +131,12 @@ function createOverlay() {
   overlayWin.on('closed', () => { overlayWin = null; });
 }
 
-// A one-time-per-launch title animation. It owns its own ~6s timing (see splash.js) and
+// A one-time-per-launch title animation. It owns its own ~3.6s timing (see splash.js) and
 // reports back over IPC when it's done rather than main.js guessing a delay. Non-focusable and
 // shown inactive: launching the app while in a game must never pull focus out of it.
 function createSplash() {
   splashWin = new BrowserWindow({
-    width: 640, height: 400, frame: false, transparent: true, resizable: false, movable: false,
+    width: 560, height: 340, frame: false, transparent: true, resizable: false, movable: false,
     fullscreenable: false, alwaysOnTop: true, skipTaskbar: true, backgroundColor: '#00000000',
     hasShadow: false, show: false, center: true, focusable: false,
     icon: ICON,
@@ -398,7 +398,7 @@ function wireWatcher() {
   // Match phases -> overlay auto-hide.
   watcher.on('matchStarting', () => { clearTimeout(matchStartTimer); matchStartTimer = setTimeout(() => setInMatch(true), 1500); });
   watcher.on('matchStart', (gametype) => {
-    if (gametype && locator.gameStarted(gametype)) decoyOnServer();
+    if (gametype && locator.gameStarted(gametype)) { decoyOnServer(); pushGameStatus(); }
     setInMatch(true);
   });
   watcher.on('matchEnd', () => setInMatch(false));
@@ -1146,16 +1146,23 @@ function buildTray() {
     const img = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'icon.png'));
     tray = new Tray(img.isEmpty() ? nativeImage.createEmpty() : img);
     tray.setToolTip('Solar Overlay');
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Show / Hide Overlay', click: toggleOverlay },
-      { label: 'Settings', click: openSettings },
-      { label: 'Blacklist Admin', click: openBlacklist },
-      { type: 'separator' },
-      { label: 'Toggle Click-Through', click: toggleClickThrough },
-      { label: 'Quit', click: () => app.quit() },
-    ]));
+    trayMenu();
     tray.on('double-click', toggleOverlay);
   } catch (_) {}
+}
+// Rebuilt when an update becomes ready, so it can be installed from the tray too.
+function trayMenu() {
+  if (!tray) return;
+  const u = updater && updater.state;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    ...(u && u.state === 'ready' ? [{ label: 'Restart to update (' + u.latest + ')', click: () => updater.install() }, { type: 'separator' }] : []),
+    { label: 'Show / Hide Overlay', click: toggleOverlay },
+    { label: 'Settings', click: openSettings },
+    { label: 'Blacklist Admin', click: openBlacklist },
+    { type: 'separator' },
+    { label: 'Toggle Click-Through', click: toggleClickThrough },
+    { label: 'Quit', click: () => app.quit() },
+  ]));
 }
 function toggleOverlay() {
   if (!overlayWin) { createOverlay(); overlayWin.showInactive(); return; }
@@ -1221,7 +1228,8 @@ if (!app.requestSingleInstanceLock()) {
     applyFullscreenFix();
     applyDecoy();
     updater = new Updater({ app });
-    updater.on('state', (st) => broadcast('update:state', st));
+    let lastUpd = null;
+    updater.on('state', (st) => { broadcast('update:state', st); if (st.state !== lastUpd) { lastUpd = st.state; trayMenu(); } });
     updater.configure(getConfig().autoUpdate !== false);
     registerIpc();
     createSplash();
@@ -1247,6 +1255,16 @@ if (!app.requestSingleInstanceLock()) {
     }, 250);
 
     app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
+    // Dev only: SOLAR_SHOTS=<dir> opens Settings and saves screenshots of the real windows after
+    // the splash, for checking the UI without clicking around. Ignored in packaged builds.
+    if (!app.isPackaged && process.env.SOLAR_SHOTS) {
+      setTimeout(openSettings, 4500);
+      setTimeout(async () => {
+        for (const [n, w] of [['overlay', overlayWin], ['settings', settingsWin]]) {
+          if (w && !w.isDestroyed()) fs.writeFileSync(path.join(process.env.SOLAR_SHOTS, n + '.png'), (await w.webContents.capturePage()).toPNG());
+        }
+      }, 7000);
+    }
   });
 
   app.on('window-all-closed', () => {}); // stay alive in tray

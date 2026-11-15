@@ -7,16 +7,16 @@ const $stack = document.getElementById('stack');
 const MAX_CARDS = 4;
 
 const KINDS = {
-  nickMatch:     { color: '#bc8cff', icon: 'dice' },
-  mention:       { color: '#58a6ff', icon: 'at' },
-  dm:            { color: '#58a6ff', icon: 'mail' },
-  partyInvite:   { color: '#3fb950', icon: 'party' },
-  friendRequest: { color: '#3ddc97', icon: 'userPlus' },
-  threat:        { color: '#f85149', icon: 'alert' },
-  nicked:        { color: '#22d3ee', icon: 'eye' },
-  test:          { color: '#58a6ff', icon: 'bell' },
-  dodge:         { color: '#f0883e', icon: 'alert' },
-  nameWatch:     { color: '#bc8cff', icon: 'sparkle' },
+  nickMatch:     { color: '#b392ff', icon: 'dice' },
+  mention:       { color: '#7aa7ff', icon: 'at' },
+  dm:            { color: '#7aa7ff', icon: 'mail' },
+  partyInvite:   { color: '#4ade80', icon: 'party' },
+  friendRequest: { color: '#4ade80', icon: 'userPlus' },
+  threat:        { color: '#ff5d5d', icon: 'alert' },
+  nicked:        { color: '#38d4f0', icon: 'eye' },
+  test:          { color: '#ffb547', icon: 'bell' },
+  dodge:         { color: '#ff8a4c', icon: 'alert' },
+  nameWatch:     { color: '#b392ff', icon: 'sparkle' },
 };
 const RANKCOLOR = { SUPERSTAR: '#ffaa00', MVP_PLUS: '#55ffff', MVP: '#55ffff', VIP_PLUS: '#55ff55', VIP: '#55ff55', YOUTUBER: '#ff5555', ADMIN: '#ff5555' };
 

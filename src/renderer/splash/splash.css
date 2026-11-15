@@ -1,46 +1,83 @@
-:root{--text:#f3f5ff;--muted:#9aa3c7}
+/* "Sunrise": a spark ignites, blooms into the sun, an orbit sweeps round and breaks into the eight
+   rays of the Solar mark, the wordmark wipes in, then everything lifts away. Pure SVG + CSS
+   (transform/opacity/stroke/clip only - no blur filters), so it stays smooth on the CPU renderer. */
+:root{--text:#f4f1ea;--muted:#8f8a80;--amber:#ffb547;--ease:cubic-bezier(.22,1,.36,1);--spring:cubic-bezier(.34,1.56,.64,1)}
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{width:100%;height:100%;background:transparent;overflow:hidden;
   font-family:'Segoe UI Variable Display','Segoe UI',system-ui,sans-serif;-webkit-user-select:none;user-select:none;
   -webkit-font-smoothing:antialiased}
 
-#card{position:relative;width:100%;height:100%;border-radius:18px;overflow:hidden;background:#03040a;
-  border:1px solid rgba(160,170,255,.12);opacity:0;animation:in .7s ease forwards}
-#card.leaving{animation:out .55s cubic-bezier(.5,0,.9,.4) forwards}
-@keyframes in{to{opacity:1}}
-@keyframes out{to{opacity:0;transform:scale(1.035)}}
+#card{position:relative;width:100%;height:100%;border-radius:20px;overflow:hidden;
+  background:radial-gradient(90% 75% at 50% 34%,#17130e 0%,#0c0c0f 55%,#09090c 100%);
+  border:1px solid rgba(255,214,150,.09);box-shadow:inset 0 1px 0 rgba(255,255,255,.04);
+  opacity:0;transform:scale(.985);animation:cardIn .5s var(--ease) forwards}
+#card.leaving{animation:cardOut .45s cubic-bezier(.4,0,.8,.3) forwards}
+@keyframes cardIn{to{opacity:1;transform:none}}
+@keyframes cardOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(-8px) scale(1.012)}}
 
-#space{position:absolute;inset:0;width:100%;height:100%;display:block}
-#vignette{position:absolute;inset:0;pointer-events:none;
-  background:radial-gradient(120% 90% at 50% 42%,transparent 55%,rgba(0,0,0,.55) 100%)}
+/* warm light pooling behind the mark */
+#glow{position:absolute;left:50%;top:33%;width:340px;height:340px;margin:-170px 0 0 -170px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,165,70,.16),rgba(255,120,50,.05) 45%,transparent 70%);
+  opacity:0;transform:scale(.5);animation:glowIn 1.6s var(--ease) .55s forwards}
+@keyframes glowIn{to{opacity:1;transform:none}}
+
+/* ---------- the mark ---------- */
+#mark{position:absolute;left:50%;top:33%;width:132px;height:132px;margin:-66px 0 0 -66px;overflow:visible}
+#card.leaving #mark{animation:markOut .45s cubic-bezier(.4,0,.8,.3) forwards}
+@keyframes markOut{to{transform:scale(1.08)}}
+
+#spark{transform-box:fill-box;transform-origin:center;opacity:0;animation:spark .62s var(--ease) .12s forwards}
+@keyframes spark{0%{opacity:0;transform:scale(.2)}35%{opacity:1;transform:scale(1.6)}100%{opacity:0;transform:scale(5)}}
+
+#sun{transform-box:fill-box;transform-origin:center;transform:scale(0);animation:sunIn .72s var(--spring) .42s forwards}
+@keyframes sunIn{to{transform:scale(1)}}
+
+#bloom{transform-box:fill-box;transform-origin:center;opacity:0;transform:scale(.4)}
+#bloom{animation:bloom 1.5s var(--ease) 1.12s forwards}
+@keyframes bloom{0%{opacity:0;transform:scale(.4)}25%{opacity:1}100%{opacity:.55;transform:scale(1.05)}}
+
+/* the orbit sweeps once round the sun, clockwise from the top, then gives way to the rays */
+#orbit{fill:none;stroke:var(--amber);stroke-width:1.4;stroke-linecap:round;stroke-dasharray:100;stroke-dashoffset:100;
+  transform:rotate(-90deg);opacity:.9;animation:orbit .72s cubic-bezier(.65,0,.35,1) .55s forwards,orbitOut .35s ease 1.22s forwards}
+@keyframes orbit{to{stroke-dashoffset:0}}
+@keyframes orbitOut{to{opacity:0;stroke-width:4}}
+
+.r{stroke:url(#ray);stroke-width:5.2;stroke-linecap:round;stroke-dasharray:15;stroke-dashoffset:15;
+  animation:ray .5s var(--ease) forwards}
+.r:nth-child(1){animation-delay:1.18s}.r:nth-child(2){animation-delay:1.22s}.r:nth-child(3){animation-delay:1.26s}.r:nth-child(4){animation-delay:1.30s}
+.r:nth-child(5){animation-delay:1.34s}.r:nth-child(6){animation-delay:1.38s}.r:nth-child(7){animation-delay:1.42s}.r:nth-child(8){animation-delay:1.46s}
+@keyframes ray{to{stroke-dashoffset:0}}
+/* once lit, the mark turns ever so slowly - alive, not busy */
+#rays{transform-origin:0 0;animation:turn 9s linear 1.2s infinite}
+@keyframes turn{to{transform:rotate(45deg)}}
 
 /* ---------- wordmark ---------- */
-#title{position:absolute;left:0;right:0;bottom:62px;text-align:center;pointer-events:none}
-#word{display:inline-flex;font-size:46px;font-weight:600;letter-spacing:.34em;margin-right:-.34em;color:var(--text);
-  text-shadow:0 0 24px rgba(255,190,120,.35)}
-#word span{display:inline-block;opacity:0;transform:translateY(10px) scale(.94);
-  background:linear-gradient(100deg,#fff 0%,#fff 38%,#ffd9a0 48%,#ffffff 58%,#dfe4ff 100%);background-size:260% 100%;
-  background-position:120% 0;-webkit-background-clip:text;background-clip:text;color:transparent;
-  animation:letter .8s cubic-bezier(.2,.9,.25,1) forwards, shine 1.6s ease-in-out forwards}
-#word span:nth-child(1){animation-delay:3.05s,3.6s}
-#word span:nth-child(2){animation-delay:3.13s,3.65s}
-#word span:nth-child(3){animation-delay:3.21s,3.7s}
-#word span:nth-child(4){animation-delay:3.29s,3.75s}
-#word span:nth-child(5){animation-delay:3.37s,3.8s}
-@keyframes letter{to{opacity:1;transform:none}}
-@keyframes shine{from{background-position:120% 0}to{background-position:-40% 0}}
-#sub{margin-top:6px;font-size:11px;font-weight:600;letter-spacing:.62em;margin-right:-.62em;text-transform:uppercase;
-  color:var(--muted);opacity:0;animation:fadeup .9s ease 3.75s forwards}
-@keyframes fadeup{from{opacity:0;transform:translateY(6px);letter-spacing:.9em}to{opacity:1;transform:none;letter-spacing:.62em}}
+#title{position:absolute;left:0;right:0;top:56.5%;text-align:center}
+#word{display:inline-block;font-size:46px;font-weight:650;letter-spacing:-.01em;line-height:1;padding:0 6px 4px;
+  color:transparent;background:linear-gradient(100deg,#f4f1ea 0%,#f4f1ea 40%,#ffd9a3 50%,#f4f1ea 60%,#f4f1ea 100%);
+  background-size:280% 100%;background-position:100% 0;-webkit-background-clip:text;background-clip:text;
+  clip-path:inset(0 100% 0 0);transform:translateY(6px);
+  animation:wipe .8s var(--ease) 1.5s forwards,sheen 1.4s ease-in-out 1.95s forwards}
+@keyframes wipe{to{clip-path:inset(0 0 0 0);transform:none}}
+@keyframes sheen{to{background-position:0 0}}
+#sub{margin-top:10px;font-size:10.5px;font-weight:600;letter-spacing:.42em;margin-right:-.42em;text-transform:uppercase;
+  color:var(--muted);opacity:0;animation:fadeUp .7s var(--ease) 1.9s forwards}
+#status{display:inline-flex;align-items:center;gap:7px;margin-top:14px;font-size:11px;color:#a8a296;font-weight:500;
+  padding:4px 11px 4px 9px;border-radius:999px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.05);
+  opacity:0;animation:fadeUp .6s var(--ease) 2.25s forwards}
+#status:empty,#status.none{visibility:hidden}
+#status i{width:6px;height:6px;border-radius:50%;background:#5f5a52}
+#status.ok i{background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.16)}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
-#foot{position:absolute;left:20px;right:20px;bottom:16px;display:flex;justify-content:space-between;font-size:10px;
-  color:rgba(154,163,199,.6);letter-spacing:.3px;opacity:0;animation:fade 1s ease 4.1s forwards}
-@keyframes fade{to{opacity:1}}
-#progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.04)}
-#bar{height:100%;width:0;background:linear-gradient(90deg,#7b8cff,#d68cff,#ffb454);box-shadow:0 0 10px rgba(214,140,255,.6);
-  animation:fill 5.6s cubic-bezier(.45,0,.2,1) .2s forwards}
-@keyframes fill{to{width:100%}}
+#foot{position:absolute;left:18px;right:18px;bottom:14px;display:flex;justify-content:space-between;font-size:10px;
+  color:rgba(170,160,145,.45);letter-spacing:.3px;opacity:0;animation:fadeUp .8s ease 2.3s forwards}
+#progress{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.035)}
+#bar{height:100%;width:100%;transform:scaleX(0);transform-origin:left;
+  background:linear-gradient(90deg,rgba(255,181,71,0),#ffb547 60%,#ffd9a3);
+  animation:fill 3.1s cubic-bezier(.45,0,.2,1) .2s forwards}
+@keyframes fill{to{transform:scaleX(1)}}
 
 @media (prefers-reduced-motion: reduce){
-  #word span,#sub,#foot{animation-duration:.01s!important;animation-delay:0s!important}
+  *,*::before,*::after{animation-duration:.01s!important;animation-delay:0s!important;animation-iteration-count:1!important}
 }

@@ -33,5 +33,10 @@
     target: s('<circle cx="8" cy="8" r="5.8"/><circle cx="8" cy="8" r="2.6"/><path d="M8 .8v2.4M8 12.8v2.4M.8 8h2.4M12.8 8h2.4"/>'),
     gauge: s('<path d="M2.2 11.5a6 6 0 1 1 11.6 0"/><path d="M8 11l2.8-4"/>'),
     info: s('<circle cx="8" cy="8" r="6"/><path d="M8 7.2v4M8 4.8v.1"/>'),
+    download: s('<path d="M8 2.5v7.5M4.8 7l3.2 3.2L11.2 7M3 13h10"/>'),
+    search: s('<circle cx="7" cy="7" r="4.2"/><path d="M10.2 10.2l3.3 3.3"/>'),
+    cube: s('<path d="M8 1.8l5.6 3.1v6.2L8 14.2l-5.6-3.1V4.9z"/><path d="M2.6 5L8 8l5.4-3M8 8v6"/>'),
+    check: s('<path d="M3 8.5l3.2 3.2L13 5"/>'),
+    sync: s('<path d="M13.2 6.2A5.3 5.3 0 0 0 3.3 5.4M2.8 9.8a5.3 5.3 0 0 0 9.9.8"/><path d="M13.4 2.8v3.5H9.9M2.6 13.2V9.7h3.5"/>'),
   };
 })();

@@ -134,19 +134,33 @@ const QUIT = [
 const LOBBY_JOIN = new RegExp('^(?:>>>\\s*)?' + RANKS + '(' + NAME + ')\\s+(?:joined|sled into|slid into|spooked into) the lobby!');
 
 // Splits a byte buffer into complete lines (the unfinished tail stays behind for the next read) and
-// decodes them. A UTF-8 file is recognised by its first non-ASCII bytes forming valid UTF-8
-// (Latin-1 text practically never does); the verdict sticks for that file.
+// decodes them. UTF-8 is recognised by non-ASCII bytes forming valid UTF-8 (Latin-1 text practically
+// never does). A file once seen as Latin-1 (Lunar) stays Latin-1; otherwise a chunk that isn't valid
+// UTF-8 as a whole is decoded line by line, so one stray byte can't garble a UTF-8 log (OneClient).
 const utf8Strict = new TextDecoder('utf-8', { fatal: true });
+const hasHigh = (b) => { for (let i = 0; i < b.length; i++) if (b[i] >= 0x80) return true; return false; };
 function decodeLines(buf, state) {
   const end = buf.lastIndexOf(0x0a);
   if (end < 0) return { lines: [], rest: buf };
   const body = buf.subarray(0, end + 1);
-  if (!state.encoding) {
-    let high = false;
-    for (let i = 0; i < body.length; i++) if (body[i] >= 0x80) { high = true; break; }
-    if (high) { try { utf8Strict.decode(body); state.encoding = 'utf8'; } catch (_) { state.encoding = 'latin1'; } }
+  let text;
+  if (state.encoding === 'latin1' || !hasHigh(body)) text = body.toString('latin1'); // ASCII reads the same either way
+  else {
+    try { text = utf8Strict.decode(body); state.encoding = 'utf8'; } catch (_) {
+      let utf8Lines = 0;
+      const parts = [];
+      let from = 0;
+      for (let i = 0; i <= body.length; i++) {
+        if (i < body.length && body[i] !== 0x0a) continue;
+        const ln = body.subarray(from, i);
+        if (hasHigh(ln)) { try { parts.push(utf8Strict.decode(ln)); utf8Lines++; } catch (_) { parts.push(ln.toString('latin1')); } }
+        else parts.push(ln.toString('latin1'));
+        from = i + 1;
+      }
+      text = parts.join('\n');
+      if (!utf8Lines && !state.encoding) state.encoding = 'latin1';
+    }
   }
-  const text = body.toString(state.encoding === 'utf8' ? 'utf8' : 'latin1');
   const lines = text.split(/\r?\n/);
   lines.pop(); // the empty string after the final newline
   return { lines, rest: Buffer.from(buf.subarray(end + 1)) };

@@ -76,6 +76,7 @@ const STAT_CATALOG = {
 };
 
 const THEMES = {
+  solar:    { bg: '#0b0c10', headerBg: '#111318', text: '#eceef2', accent: '#ffb547', grid: '#1d2028' },
   midnight: { bg: '#0d1117', headerBg: '#161b22', text: '#e6edf3', accent: '#58a6ff', grid: '#21262d' },
   obsidian: { bg: '#000000', headerBg: '#0a0a0a', text: '#f0f0f0', accent: '#8b5cf6', grid: '#1a1a1a' },
   ocean:    { bg: '#0b1e2d', headerBg: '#0f2a3d', text: '#dbeafe', accent: '#22d3ee', grid: '#1e3a4d' },
@@ -110,7 +111,7 @@ function secretText(path, ph, wide) {
   const i = el('input'); i.type = 'password'; i.autocomplete = 'off'; i.spellcheck = false;
   i.value = getPath(cfg, path) ?? ''; if (ph) i.placeholder = ph;
   i.onchange = () => set(path, i.value);
-  const eye = el('button', 'eye-toggle'); eye.type = 'button'; eye.textContent = '👁'; eye.title = 'Show/hide key';
+  const eye = el('button', 'eye-toggle'); eye.type = 'button'; eye.innerHTML = SolarIcons.eye; eye.title = 'Show/hide key';
   eye.onclick = (e) => {
     e.preventDefault();
     const showing = i.type === 'text';
@@ -149,7 +150,7 @@ function color(path) {
 // ---------- tabs ----------
 const TABS = {
   General: panelGeneral,
-  'Log & Detection': panelLog,
+  'Game Client': panelClient,
   Triggers: panelTriggers,
   Notifications: panelNotifications,
   'Name Watch': panelNameWatch,
@@ -158,16 +159,37 @@ const TABS = {
   'Discord Decoy': panelDecoy,
   'API Keys': panelApi,
   Connections: panelConnections,
-  Appearance: panelAppearance,
   Columns: panelColumns,
   'Sniper Score': panelSniper,
+  Appearance: panelAppearance,
   Performance: panelPerf,
   About: panelAbout,
 };
+const TAB_GROUPS = [
+  ['Overlay', ['General', 'Game Client', 'Triggers', 'Notifications']],
+  ['Tools', ['Name Watch', 'Nick Roller', 'Chat & Dodge', 'Discord Decoy']],
+  ['Data', ['API Keys', 'Connections', 'Columns', 'Sniper Score']],
+  ['App', ['Appearance', 'Performance', 'About']],
+];
+
+// The Settings window wears the same theme as the overlay.
+function applyTheme() {
+  const t = (cfg && cfg.theme) || {};
+  const r = document.documentElement.style;
+  r.setProperty('--bg', t.bg || '#0b0c10');
+  r.setProperty('--header', t.headerBg || '#111318');
+  r.setProperty('--text', t.text || '#eceef2');
+  r.setProperty('--accent', t.accent || '#ffb547');
+  r.setProperty('--grid', t.grid || '#1d2028');
+  // Text on the accent colour: dark on light accents, white on dark ones.
+  const hex = String(t.accent || '#ffb547').replace('#', '');
+  const lum = (parseInt(hex.slice(0, 2), 16) * 299 + parseInt(hex.slice(2, 4), 16) * 587 + parseInt(hex.slice(4, 6), 16) * 114) / 1000;
+  r.setProperty('--on-accent', lum > 150 ? '#1a1206' : '#ffffff');
+}
 
 function panelGeneral(p) {
   p.appendChild(header('General', 'Who the overlay is and how it identifies you.'));
-  p.appendChild(fieldRow('Your IGN', 'The name the overlay reacts to (mentions, "hide self", etc.)', text('selfName', 'your username')));
+  p.appendChild(fieldRow('Your IGN', 'Filled in automatically from your game log. The name the overlay reacts to (mentions, "hide self", etc.)', text('selfName', 'your username')));
   const aliases = el('input'); aliases.type = 'text'; aliases.style.width = '240px';
   aliases.value = (cfg.reactNames || []).join(', '); aliases.placeholder = 'alt1, alt2';
   aliases.onchange = () => set('reactNames', aliases.value.split(',').map((s) => s.trim()).filter(Boolean));
@@ -176,17 +198,74 @@ function panelGeneral(p) {
   p.appendChild(fieldRow('Hide nicked / unresolved players', '', toggle('hideNicked')));
 }
 
-function panelLog(p) {
-  p.appendChild(header('Log & Detection', 'Read your client log to auto-detect players in games, parties, chat.'));
-  p.appendChild(fieldRow('Enable log watcher', '', toggle('logEnabled')));
-  const row = el('div'); row.style.display = 'flex'; row.style.gap = '8px'; row.style.alignItems = 'center';
-  const t = text('logPath', '', true); const b = el('button', 'ghost'); b.textContent = 'Browse…';
-  b.onclick = async () => { const r = await api.pickLog(); if (r) { t.value = r; cfg.logPath = r; toast('Log path set', 'ok'); } };
-  row.appendChild(t); row.appendChild(b);
-  p.appendChild(fieldRow('Log file path', 'e.g. Lunar 1.8: .lunarclient/profiles/1.8/logs/latest.log', row));
+const ago = (t) => { const s = Math.max(0, (Date.now() - t) / 1000); if (s < 60) return 'just now'; const m = s / 60; if (m < 60) return Math.floor(m) + ' min ago'; const h = m / 60; if (h < 24) return Math.floor(h) + ' h ago'; return Math.floor(h / 24) + ' d ago'; };
+
+function panelClient(p) {
+  p.appendChild(header('Game Client', 'Solar reads your Minecraft client\'s log to see who is in your lobby, your party and your chat. Lunar Client, OneClient, Badlion, vanilla and the usual launchers all work - and you can switch between them any time.'));
+
+  // Live status: which client, which log, where you are.
+  const hero = el('div', 'client-hero standalone');
+  hero.innerHTML = '<div class="orb"></div><div><div class="t1"></div><div class="t2"></div></div><div class="live"><i class="livedot"></i><span></span></div>';
+  hero.querySelector('.orb').innerHTML = SolarIcons.cube;
+  p.appendChild(hero);
+  const paint = (st) => {
+    if (!hero.isConnected || !st) return;
+    const ok = st.log && st.log.ok;
+    hero.querySelector('.t1').textContent = st.clientName ? st.label : 'No client found yet';
+    hero.querySelector('.t2').textContent = st.clientName
+      ? (st.mode === 'auto' ? 'Picked automatically - Solar follows whichever client you play on.' : 'Fixed log file.')
+      : 'Start Minecraft with any client; Solar picks it up within a few seconds.';
+    hero.querySelector('.livedot').className = 'livedot ' + (ok ? 'ok' : st.clientName ? 'wait' : '');
+    hero.querySelector('.live span').textContent = !st.clientName ? 'Waiting' : !ok ? 'Waiting for the log' : (st.place && st.place.label) || 'Connected';
+  };
+  api.getGameStatus().then(paint);
+  const off = api.onGameStatus((st) => { if (hero.isConnected) paint(st); else off(); });
+
+  p.appendChild(header('Which log', 'Automatic is right for almost everyone. Pick a specific log only if you run two clients at once and want to pin one.'));
+  const seg = el('div', 'seg');
+  const bAuto = el('button'); bAuto.textContent = 'Automatic';
+  const bMan = el('button'); bMan.textContent = 'Choose a log';
+  seg.appendChild(bAuto); seg.appendChild(bMan);
+  p.appendChild(fieldRow('Mode', '', seg));
+  const list = el('div', 'loglist');
+  const manualWrap = el('div');
+  manualWrap.appendChild(list);
+  const browse = el('button', 'ghost'); browse.innerHTML = SolarIcons.file + '<span>Other file…</span>';
+  browse.onclick = async () => { const r = await api.pickLog(); if (r) { toast('Reading ' + r.split(/[\\/]/).slice(-3).join('/'), 'ok'); refreshList(); } };
+  manualWrap.appendChild(browse);
+  p.appendChild(manualWrap);
+  async function refreshList() {
+    cfg = await api.getConfig();
+    const manual = cfg.logMode === 'manual';
+    bAuto.classList.toggle('on', !manual); bMan.classList.toggle('on', manual);
+    manualWrap.classList.toggle('hidden', !manual);
+    const logs = await api.detectedLogs();
+    list.innerHTML = '';
+    if (!logs.length) { const e = el('div', 'kv'); e.textContent = 'No client logs found on this PC yet.'; list.appendChild(e); }
+    for (const l of logs.slice(0, 8)) {
+      const it = el('div', 'logitem' + (manual && cfg.logPath === l.path ? ' on' : ''));
+      it.innerHTML = '<span class="mark"></span><div style="min-width:0"><div class="cl"></div><div class="pa"></div></div><span class="ago"></span>';
+      it.querySelector('.mark').innerHTML = manual && cfg.logPath === l.path ? SolarIcons.check : '';
+      it.querySelector('.cl').textContent = l.label;
+      it.querySelector('.pa').textContent = l.path;
+      it.querySelector('.ago').textContent = ago(l.mtime);
+      it.onclick = async () => { await api.useLog(l.path); refreshList(); };
+      list.appendChild(it);
+    }
+  }
+  bAuto.onclick = async () => { await api.useLog('auto'); refreshList(); toast('Following your active client', 'ok'); };
+  bMan.onclick = () => { bMan.classList.add('on'); bAuto.classList.remove('on'); manualWrap.classList.remove('hidden'); };
+  refreshList();
+
+  p.appendChild(header('Detection', ''));
+  p.appendChild(fieldRow('Read the game log', 'Off = Solar only shows players you add by hand.', toggle('logEnabled')));
   p.appendChild(fieldRow('Clear list on server change', 'Wipe the list when you leave/join a game.', toggle('clearOnServerChange')));
   p.appendChild(fieldRow('Clear on lobby join', '', toggle('clearOnLobbyJoin')));
   p.appendChild(fieldRow('Track anyone who talks in chat', 'Add any player who speaks in chat to the list, scoped to your actual match lobby (never the main hub or the shared matchmaking queue).', toggle('trackChatSpeakers')));
+
+  const how = el('div', 'kv');
+  how.innerHTML = '<b>Which game am I in?</b> Lunar Client reports it on its own. On OneClient and others, Solar reads Hypixel\'s own messages and, with a Hypixel API key, asks Hypixel which game you just joined (your <span class="pill">Online Status</span> must be visible in Hypixel\'s API settings). Without that, the overlay still works - it just learns it\'s Bed Wars when the game starts.';
+  p.appendChild(how);
 }
 
 function panelTriggers(p) {
@@ -296,14 +375,21 @@ function panelChatDodge(p) {
     cmdOut.innerHTML = safe === cmd.value.trim() ? '<span class="ok">✓</span>' : `<span class="bad">will use ${esc(safe)}</span>`;
   });
   p.appendChild(fieldRow('Leave command', 'A plain slash command, e.g. /l bedwars or /play bedwars_eight_one. In a party, only the leader leaving takes everyone along.', cmdRow));
+
+  p.appendChild(header("Knowing it's Bed Wars", "Party warnings and auto-dodge only act in a Bed Wars pre-game lobby. Lunar Client reports which game you joined; other clients (like OneClient) don't, so Solar first asks Hypixel's status API."));
+  p.appendChild(fieldRow('Send /locraw when needed', "If the status API can't answer (no key, or your online status is hidden from the API), Solar sends /locraw once after you join a game - the same command Lunar sends - and reads the reply. Only while party warnings or auto-dodge are on.", toggle('locrawFallback')));
 }
 
 function panelDecoy(p) {
-  p.appendChild(header('Discord Decoy', 'Shows a fake Lunar Client status on your Discord profile, with the real Lunar app, icons and wording, but only ever with Bed Wars games you are NOT in. A sniper reading your status queues into the wrong game right when you queue.'));
+  p.appendChild(header('Discord Decoy', 'Shows a fake Lunar Client status on your Discord profile, with the real Lunar app, icons and wording, but only ever with Bed Wars games you are NOT in - whichever client you actually play on. A sniper reading your status queues into the wrong game right when you queue.'));
   const warn = el('div', 'note warn'); warn.style.display = 'none';
   const wi = el('span', 'ic'); wi.innerHTML = SolarIcons.alert;
-  const wt = el('div'); wt.textContent = 'Lunar Client\'s own Discord Rich Presence is ON. It would show your real game next to the decoy. Turn it off in the Lunar launcher: Settings > Discord Rich Presence.';
+  const wt = el('div');
   warn.appendChild(wi); warn.appendChild(wt); p.appendChild(warn);
+  const RPC_WARN = {
+    lunar: 'Lunar Client\'s own Discord Rich Presence is ON. It would show your real game next to the decoy. Turn it off in the Lunar launcher: Settings > Discord Rich Presence.',
+    oneclient: 'OneClient\'s own Discord status is ON. It would show next to the decoy. Turn it off in the OneClient launcher: Settings > Discord RPC.',
+  };
 
   p.appendChild(header('Decoy presence', 'Joining a Bed Wars game swaps in a new fake game at that exact moment. In lobbies and other games it shows Lunar\'s plain "Playing Hypixel". Cleared while Minecraft isn\'t running.'));
   p.appendChild(fieldRow('Enable decoy', 'Off by default. Needs the Discord desktop app running, with activity status on.', toggle('decoyPresence.enabled')));
@@ -322,7 +408,9 @@ function panelDecoy(p) {
   let last = null;
   const paint = () => {
     const r = last || {};
-    warn.style.display = r.lunarRpcOn ? '' : 'none';
+    const on = [r.lunarRpcOn && RPC_WARN.lunar, r.oneClientRpcOn && RPC_WARN.oneclient].filter(Boolean);
+    warn.style.display = on.length ? '' : 'none';
+    wt.textContent = on.join(' ');
     const shown = r.enabled && r.discord && r.details;
     card.classList.toggle('off', !shown);
     q('.rpc-d').textContent = r.details || 'Playing Bed Wars on Hypixel';
@@ -554,18 +642,17 @@ function panelConnections(p) {
 }
 
 function openConnEditor(conn, idx) {
-  const back = el('div'); back.style.cssText = 'position:fixed;inset:0;background:#0008;z-index:80;display:flex;align-items:center;justify-content:center';
-  const box = el('div'); box.style.cssText = 'background:var(--header);border:1px solid var(--grid);border-radius:8px;padding:14px;width:380px';
-  const inputCss = 'width:100%;margin-bottom:6px;padding:6px;background:var(--bg);border:1px solid var(--grid);color:var(--text);border-radius:5px;box-sizing:border-box;font-family:inherit';
-  box.innerHTML = `<div style="font-weight:600;margin-bottom:8px">${conn ? 'Edit' : 'Add'} connection</div>`;
-  const name = el('input'); name.type = 'text'; name.placeholder = 'Name (e.g. MyBlacklist)'; name.style.cssText = inputCss;
+  const back = el('div', 'modal-back');
+  const box = el('div', 'modal');
+  box.innerHTML = `<div class="m-title">${conn ? 'Edit' : 'Add'} connection</div>`;
+  const name = el('input'); name.type = 'text'; name.placeholder = 'Name (e.g. MyBlacklist)';
   name.value = (conn && conn.name) || '';
-  const endpoint = el('textarea'); endpoint.placeholder = 'https://example.com/api?uuid={id}&key={key}'; endpoint.style.cssText = inputCss + ';height:60px;resize:vertical';
+  const endpoint = el('textarea'); endpoint.placeholder = 'https://example.com/api?uuid={id}&key={key}';
   endpoint.value = (conn && conn.endpoint) || '';
-  const key = el('input'); key.type = 'password'; key.placeholder = 'API key (optional, fills {key})'; key.style.cssText = inputCss + ';margin-bottom:10px';
+  const key = el('input'); key.type = 'password'; key.placeholder = 'API key (optional, fills {key})';
   key.value = (conn && conn.key) || '';
   box.appendChild(name); box.appendChild(endpoint); box.appendChild(key);
-  const btns = el('div'); btns.style.cssText = 'display:flex;gap:6px;justify-content:flex-end';
+  const btns = el('div', 'm-btns');
   const cancel = el('button', 'ghost'); cancel.textContent = 'Cancel';
   const saveBtn = el('button', 'act'); saveBtn.textContent = 'Save';
   cancel.onclick = () => back.remove();
@@ -591,8 +678,9 @@ function panelAppearance(p) {
   p.appendChild(header('Appearance', 'Look and window behavior.'));
   const presets = el('div', 'presets');
   for (const [name, th] of Object.entries(THEMES)) {
-    const d = el('div', 'preset'); d.innerHTML = `<span class="dot" style="background:${th.accent}"></span>${name}`;
-    d.onclick = async () => { cfg = await api.setConfig({ theme: { name, ...th } }); toast('Theme: ' + name, 'ok'); };
+    const d = el('div', 'preset' + ((cfg.theme || {}).name === name ? ' on' : ''));
+    d.innerHTML = `<span class="swatch" style="background:${th.bg}"><i style="background:${th.accent}"></i></span>${name}`;
+    d.onclick = async () => { cfg = await api.setConfig({ theme: { name, ...th } }); applyTheme(); rerender(); toast('Theme: ' + name, 'ok'); };
     presets.appendChild(d);
   }
   p.appendChild(presets);
@@ -830,29 +918,66 @@ function panelPerf(p) {
 }
 
 function panelAbout(p) {
-  p.appendChild(header('About & Shortcuts', ''));
-  const ver = el('div', 'kv'); ver.style.marginBottom = '8px';
-  api.appInfo().then((i) => { ver.textContent = 'Solar Overlay v' + i.version; });
-  p.appendChild(ver);
-  const s = el('div'); s.innerHTML = `
-    <div class="kv" style="font-size:12px;line-height:1.9">
-      <span class="pill">Alt+B</span> show/hide overlay &nbsp;
-      <span class="pill">Alt+X</span> click-through &nbsp;
-      <span class="pill">Alt+C</span> clear list &nbsp;
-      <span class="pill">Alt+S</span> settings &nbsp;
-      <span class="pill">Alt+N</span> start/stop nick roller &nbsp;
-      <span class="pill">Alt+T</span> test notification in-game &nbsp;
-      <span class="pill">Alt+W</span> chat warning (not sent)<br>
-      Right-click a column header → toggle columns. Drag headers to reorder. Click header to sort.<br>
-      Right-click a player row → Plancke, NameMC, copy, local tag, watchlist, remove.<br>
-      Party members are picked up automatically (invites, joins, party chat, summons, /p list) — no need to run /p list.<br>
-      Bundled local blacklist: <b>9,014 UUIDs / 9,349 tags</b> (info, caution, legit_sniper, account) imported from local exports.
-    </div>`;
-  p.appendChild(s);
+  p.appendChild(header('About', ''));
+  const hero = el('div', 'about-hero standalone');
+  hero.innerHTML = '<div class="mark"></div><div><div class="t1">Solar Overlay</div><div class="t2"></div></div>';
+  hero.querySelector('.mark').innerHTML = SolarIcons.logo;
+  api.appInfo().then((i) => { hero.querySelector('.t2').textContent = 'Version ' + i.version + ' · Hypixel Bed Wars overlay by vossis'; });
+  p.appendChild(hero);
+
+  // ---- updates ----
+  p.appendChild(header('Updates', 'New versions come straight from GitHub. Each one is checked against Solar\'s release signature before it\'s installed, and nothing restarts by itself mid-game - it lands when you click Restart, or the next time you quit Solar.'));
+  const box = el('div', 'upd');
+  box.innerHTML = '<div class="ui"></div><div class="ut"><b></b><div></div><div class="progress hidden"><i></i></div></div><div class="ub"></div>';
+  p.appendChild(box);
+  const notes = el('div', 'notes hidden'); p.appendChild(notes);
+  p.appendChild(fieldRow('Update automatically', 'Check on launch and every few hours, download in the background.', toggle('autoUpdate')));
+  const btn = el('button', 'ghost'); box.querySelector('.ub').appendChild(btn);
+  const paintUpd = (u) => {
+    if (!box.isConnected || !u) return;
+    const ui = box.querySelector('.ui'), t = box.querySelector('.ut b'), d = box.querySelector('.ut div'), bar = box.querySelector('.progress');
+    ui.className = 'ui'; bar.classList.add('hidden'); btn.className = 'ghost'; btn.disabled = false; btn.classList.remove('hidden');
+    notes.classList.add('hidden');
+    const when = u.checkedAt ? 'Checked ' + ago(u.checkedAt) + '.' : '';
+    switch (u.state) {
+      case 'checking': ui.innerHTML = SolarIcons.sync; t.textContent = 'Checking for updates…'; d.textContent = ''; btn.classList.add('hidden'); break;
+      case 'downloading':
+        ui.innerHTML = SolarIcons.download; ui.classList.add('ready'); t.textContent = 'Downloading Solar ' + u.latest + '…'; d.textContent = 'Verified against the release signature before install.';
+        bar.classList.remove('hidden'); bar.querySelector('i').style.width = Math.round((u.progress || 0) * 100) + '%'; btn.classList.add('hidden'); break;
+      case 'ready':
+        ui.innerHTML = SolarIcons.download; ui.classList.add('ready'); t.textContent = 'Solar ' + u.latest + ' is ready'; d.textContent = 'Restart now, or it installs the next time you quit.';
+        btn.className = 'act'; btn.innerHTML = SolarIcons.sync + '<span>Restart to update</span>'; btn.onclick = () => api.installUpdate(); break;
+      case 'available':
+        ui.innerHTML = SolarIcons.download; ui.classList.add('ready'); t.textContent = 'Solar ' + u.latest + ' is available'; d.textContent = u.error || 'Get it from the releases page.';
+        btn.innerHTML = '<span>Open releases</span>'; btn.onclick = () => api.openLink(u.url || 'https://github.com/realvossis/Solar-Bedwars-Overlay/releases'); break;
+      case 'latest': ui.innerHTML = SolarIcons.check; ui.classList.add('ok'); t.textContent = 'You\'re up to date'; d.textContent = when; btn.innerHTML = '<span>Check again</span>'; btn.onclick = check; break;
+      case 'error': ui.innerHTML = SolarIcons.alert; t.textContent = 'Couldn\'t update'; d.innerHTML = `<span class="bad">${esc(u.error)}</span>`; btn.innerHTML = '<span>Try again</span>'; btn.onclick = check; break;
+      default: ui.innerHTML = SolarIcons.sync; t.textContent = 'Updates'; d.textContent = 'Not checked yet this session.'; btn.innerHTML = '<span>Check now</span>'; btn.onclick = check;
+    }
+    if (u.notes && (u.state === 'ready' || u.state === 'available' || u.state === 'downloading')) { notes.textContent = u.notes; notes.classList.remove('hidden'); }
+  };
+  async function check() { paintUpd({ state: 'checking' }); paintUpd(await api.checkForUpdate()); }
+  api.getUpdateState().then(paintUpd);
+  const offU = api.onUpdateState((u) => { if (box.isConnected) paintUpd(u); else offU(); });
+
+  // ---- shortcuts ----
+  p.appendChild(header('Shortcuts', 'Work everywhere, even with Minecraft focused.'));
+  const keys = el('div', 'keys');
+  for (const [k, what] of [['Alt+B', 'Show / hide the overlay'], ['Alt+X', 'Click-through'], ['Alt+C', 'Clear the list'], ['Alt+S', 'Settings'],
+    ['Alt+N', 'Start / stop the nick roller'], ['Alt+T', 'Test notification in-game'], ['Alt+W', 'Type a chat warning (not sent)']]) {
+    const a = el('span', 'pill'); a.textContent = k; const b = el('span'); b.textContent = what;
+    keys.appendChild(a); keys.appendChild(b);
+  }
+  p.appendChild(keys);
+  const tips = el('div', 'kv');
+  tips.innerHTML = 'Right-click a column header to toggle columns, drag headers to reorder, click to sort. Right-click a player for Plancke, NameMC, tags and more. ' +
+    'Party members are picked up automatically - no need to run /p list. Bundled local blacklist: <b>9,014 UUIDs / 9,349 tags</b>.';
+  p.appendChild(tips);
+
+  p.appendChild(header('Reset', ''));
   const reset = el('button', 'ghost'); reset.textContent = 'Reset all settings to defaults';
-  reset.style.marginTop = '16px';
-  reset.onclick = async () => { cfg = await api.resetConfig(); rerender(); toast('Settings reset', 'ok'); };
-  p.appendChild(reset);
+  reset.onclick = async () => { cfg = await api.resetConfig(); applyTheme(); rerender(); toast('Settings reset', 'ok'); };
+  p.appendChild(fieldRow('Start fresh', 'Your API keys are cleared too.', reset));
 }
 
 function header(t, sub) { const d = el('div', 'sec-head'); d.innerHTML = `<h2>${esc(t)}</h2>` + (sub ? `<div class="sub">${esc(sub)}</div>` : ''); return d; }
@@ -868,7 +993,7 @@ function groupSections(p) {
       section = el('div', 'section'); p.insertBefore(section, k); section.appendChild(k); continue;
     }
     if (!seenTitle) continue;
-    if (!section && k.classList.contains('note')) continue; // banners stand on their own
+    if (!section && (k.classList.contains('note') || k.classList.contains('standalone'))) continue; // banners stand on their own
     if (!section) { section = el('div', 'section'); p.insertBefore(section, k); }
     section.appendChild(k);
   }
@@ -876,19 +1001,23 @@ function groupSections(p) {
 
 // ---------- shell ----------
 const TAB_ICONS = {
-  General: 'user', 'Log & Detection': 'file', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice', 'Chat & Dodge': 'at', 'Discord Decoy': 'mask',
+  General: 'user', 'Game Client': 'cube', Triggers: 'bolt', Notifications: 'bell', 'Name Watch': 'eye', 'Nick Roller': 'dice', 'Chat & Dodge': 'at', 'Discord Decoy': 'mask',
   'API Keys': 'key', Connections: 'link', Appearance: 'palette', Columns: 'columns', 'Sniper Score': 'target', Performance: 'gauge', About: 'info',
 };
-let active = 'General';
+let active = 'General', lastActive = null, updateReady = false;
 function buildTabs() {
   const nav = $('#tabs'); nav.innerHTML = '';
-  for (const name of Object.keys(TABS)) {
-    const t = el('div', 'tab' + (name === active ? ' active' : ''));
-    const ic = el('span', 'ic'); ic.innerHTML = SolarIcons[TAB_ICONS[name]] || '';
-    const label = el('span'); label.textContent = name;
-    t.appendChild(ic); t.appendChild(label);
-    t.onclick = () => { active = name; rerender(); };
-    nav.appendChild(t);
+  for (const [group, names] of TAB_GROUPS) {
+    nav.appendChild(el('div', 'tab-group')).textContent = group;
+    for (const name of names) {
+      const t = el('div', 'tab' + (name === active ? ' active' : ''));
+      const ic = el('span', 'ic'); ic.innerHTML = SolarIcons[TAB_ICONS[name]] || '';
+      const label = el('span'); label.textContent = name;
+      t.appendChild(ic); t.appendChild(label);
+      if (name === 'About' && updateReady) t.appendChild(el('span', 'badge')).textContent = 'Update';
+      t.onclick = () => { active = name; rerender(); };
+      nav.appendChild(t);
+    }
   }
 }
 function rerender() {
@@ -896,7 +1025,10 @@ function rerender() {
   const p = $('#panel'); p.innerHTML = '';
   TABS[active](p);
   groupSections(p);
-  p.scrollTop = 0;
+  // Only a new page slides in; re-renders of the same page (after a change) stay put.
+  p.classList.toggle('enter', active !== lastActive);
+  if (active !== lastActive) p.scrollTop = 0;
+  lastActive = active;
 }
 for (const n of document.querySelectorAll('[data-icon]')) n.innerHTML = SolarIcons[n.dataset.icon] || '';
 api.appInfo().then((i) => { $('#ver').textContent = 'v' + i.version; }).catch(() => {});
@@ -906,4 +1038,9 @@ function toast(msg, kind) { const d = el('div', 'toast ' + (kind || '')); d.text
 $('#min').onclick = () => api.minimize();
 $('#close').onclick = () => api.close();
 
-(async () => { cfg = await api.getConfig(); rerender(); api.onConfigChanged((c) => { cfg = c; }); })();
+(async () => {
+  cfg = await api.getConfig(); applyTheme(); rerender();
+  api.onConfigChanged((c) => { const themeChanged = JSON.stringify(c.theme) !== JSON.stringify(cfg.theme); cfg = c; if (themeChanged) applyTheme(); });
+  const upd = (u) => { const r = !!u && u.state === 'ready'; if (r !== updateReady) { updateReady = r; buildTabs(); } };
+  api.getUpdateState().then(upd); api.onUpdateState(upd);
+})();

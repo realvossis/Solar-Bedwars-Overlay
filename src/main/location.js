@@ -99,8 +99,9 @@ function describe(place, inMatch, modes = {}) {
   const game = place.gametype ? (GAMES[place.gametype] || place.gametype.charAt(0) + place.gametype.slice(1).toLowerCase().replace(/_/g, ' ')) : null;
   if (place.kind === 'lobby') return game ? game + ' lobby' : 'Lobby';
   const mode = modes[place.mode] && modes[place.mode].name;
-  const what = [game, mode].filter(Boolean).join(' ') || 'Game';
-  return what + (inMatch ? '' : ' · pre-game');
+  // Short enough for the overlay's title bar: "Doubles pre-game", then "Bed Wars Doubles" once it starts.
+  if (!inMatch) return mode ? mode + ' pre-game' : game ? game + ' pre-game' : 'Pre-game';
+  return [game, mode].filter(Boolean).join(' ') || 'In game';
 }
 
 module.exports = { Locator, describe, isGameServer, GAMES };
