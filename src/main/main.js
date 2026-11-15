@@ -1269,6 +1269,9 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on('window-all-closed', () => {}); // stay alive in tray
   // A downloaded update lands when you quit, so the next launch is already the new version.
-  app.on('before-quit', () => { if (updater && updater.state.state === 'ready') updater.install(false); });
+  app.on('before-quit', (e) => {
+    // Hold the quit until the update's installer/swap has been started; install() quits again after.
+    if (updater && updater.state.state === 'ready' && !updater.applied) { e.preventDefault(); updater.install(false); }
+  });
   app.on('will-quit', () => { globalShortcut.unregisterAll(); if (nickRoller) { nickRoller.stop('app closing'); nickRoller.d.helper.stop(); } if (notifier) notifier.destroy(); if (fsHelper) fsHelper.stop(); if (chatHelper) chatHelper.stop(); if (rpc) rpc.stop(); });
 }

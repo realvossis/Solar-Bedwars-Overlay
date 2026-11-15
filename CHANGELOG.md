@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.3.0 — 2026-11-15
+## 1.3.1 — 2026-11-15
 
 ### Added
 - **OneClient support - and Lunar keeps working.** Solar finds every Minecraft client on your PC
@@ -36,6 +36,10 @@
 - Chat from titled players ("Bridge Legend V [MVP++] Name: ...") now counts for mentions; system lines
   like "Opponent: ..." or "Winner: ..." no longer count as someone talking.
 - Join lines in any game's pre-game lobby are ignored (Hypixel scrambles them outside Bed Wars too).
+
+(1.3.0 was replaced by this release within minutes: its updater started the install step as a plain
+child process, which can be ended together with Solar. 1.3.1 starts it independently and only quits
+once it is running.)
 
 ## 1.2.9 — 2026-10-31
 

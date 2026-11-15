@@ -17,7 +17,7 @@ const { EventEmitter } = require('events');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { execFile } = require('child_process');
 
 const REPO = 'realvossis/Solar-Bedwars-Overlay';
 const RELEASE_PUBLIC_KEY = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAhVVI0Ye7BzE2IiY/6OyW1SVdvZ8KDCt+EB0Hwopi/78=\n-----END PUBLIC KEY-----\n';
@@ -154,23 +154,36 @@ class Updater extends EventEmitter {
     return dest;
   }
 
-  // Applies a ready update. relaunch=false when quitting anyway (the update just lands for next time).
+  // Applies a ready update, then quits. relaunch=false when quitting anyway (it lands for next time).
   install(relaunch = true) {
     const s = this.state;
     if (s.state !== 'ready' || !s.file || this.applied || !fs.existsSync(s.file)) return false;
     this.applied = true;
-    if (this.kind === 'installer') {
+    const q = (p) => '"' + p + '"';
+    const cmd = this.kind === 'installer'
       // electron-builder's NSIS installer: /S = silent, --force-run = start the app when done.
-      spawn(s.file, relaunch ? ['/S', '--force-run'] : ['/S'], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-    } else {
-      this._swapPortable(s.file, relaunch);
-    }
-    setTimeout(() => this.app.quit(), 200);
+      ? q(s.file) + (relaunch ? ' /S --force-run' : ' /S')
+      : this._swapPortable(s.file, relaunch);
+    this._launch(cmd).then((ok) => {
+      if (!ok) { this.applied = false; this._set({ state: 'error', error: 'could not start the update - try again' }); return; }
+      this.app.quit();
+    });
     return true;
+  }
+
+  // Starts a process that must outlive Solar. A plain detached child can be killed together with us
+  // (the portable launcher, or whatever started Solar, may hold everything in one Windows job), so
+  // it's created through WMI instead, which puts it outside any job of ours.
+  _launch(commandLine) {
+    const ps = "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '" + commandLine.replace(/'/g, "''") + "' }; exit [int]$r.ReturnValue";
+    return new Promise((resolve) => {
+      execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], { windowsHide: true, timeout: 30000 }, (err) => resolve(!err));
+    });
   }
 
   // The running portable exe can't be overwritten until Solar has exited, so a small hidden
   // PowerShell script waits for that, moves the new exe into place and (optionally) starts it.
+  // Returns the command line that runs it.
   _swapPortable(file, relaunch) {
     const cur = this.portable;
     const dir = path.dirname(cur);
@@ -189,8 +202,7 @@ class Updater extends EventEmitter {
     ].join('\r\n');
     const ps1 = path.join(this.dir, 'apply-update.ps1');
     fs.writeFileSync(ps1, script, 'utf8');
-    spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ps1],
-      { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    return `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "${ps1}"`;
   }
 }
 
