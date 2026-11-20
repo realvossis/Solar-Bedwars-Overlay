@@ -498,7 +498,57 @@ function panelNickRoller(p) {
   const statusBox = el('div', 'kv'); statusBox.style.margin = '8px 0';
   p.appendChild(statusBox);
 
-  p.appendChild(header('Requirements', 'A rolled name is taken when it passes every check below AND matches at least one of your rules (if you have any).'));
+  // ---- built-in nick styles (see nickStyles.js) ----
+  p.appendChild(header('Nick styles', 'The shapes good Hypixel nicks come in - from OG single words to formats that pass as a real account - researched from how players grade rolled nicks. Pick any: a rolled name that fits one of them (or one of your rules below) stops the roller.'));
+  const presetRow = el('div', 'style-presets');
+  const grid = el('div', 'style-grid');
+  p.appendChild(presetRow); p.appendChild(grid);
+  const avoidRow = fieldRow('Skip obvious nicks', 'Never stop on names experienced players read as a nick at a glance.', toggle('nickRoller.avoidObvious'));
+  p.appendChild(avoidRow);
+  const TIER_HELP = { S: 'Top tier - rare, OG', A: 'Looks like a real player', B: 'Classic styles', C: 'Common - easier to spot as a nick' };
+  const chosen = () => ((cfg.nickRoller || {}).styles || []).slice();
+  let catalog = null;
+  const paintStyles = () => {
+    if (!catalog) return;
+    const on = new Set(chosen());
+    grid.innerHTML = '';
+    for (const s of catalog.styles) {
+      const card = el('div', 'style-card' + (on.has(s.id) ? ' on' : ''));
+      card.title = TIER_HELP[s.tier] || '';
+      card.innerHTML = '<div class="sc-top"><span class="tier"></span><b></b><span class="tick"></span></div><div class="sc-desc"></div><div class="sc-ex"></div>';
+      const tier = card.querySelector('.tier'); tier.textContent = s.tier; tier.classList.add('t' + s.tier);
+      card.querySelector('b').textContent = s.name;
+      card.querySelector('.tick').innerHTML = on.has(s.id) ? SolarIcons.check : '';
+      card.querySelector('.sc-desc').textContent = s.desc;
+      for (const ex of s.examples) card.querySelector('.sc-ex').appendChild(el('span', 'pill')).textContent = ex;
+      card.onclick = async () => {
+        const next = new Set(chosen());
+        if (next.has(s.id)) next.delete(s.id); else next.add(s.id);
+        await set('nickRoller.styles', catalog.styles.map((x) => x.id).filter((id) => next.has(id)));
+        paintStyles(); refresh();
+      };
+      grid.appendChild(card);
+    }
+  };
+  const PRESETS = [
+    ['OG only', ['og', 'stretched', 'short', 'semi_og']],
+    ['Looks legit', ['og', 'stretched', 'short', 'semi_og', 'echo', 'word_word', 'two_words']],
+    ['All clean', ['og', 'stretched', 'short', 'semi_og', 'echo', 'word_word', 'two_words', 'wrapped', 'short_digit', 'xx']],
+    ['None', []],
+  ];
+  for (const [label, ids] of PRESETS) {
+    const b = el('button', 'ghost'); b.textContent = label;
+    b.onclick = async () => { await set('nickRoller.styles', ids); paintStyles(); refresh(); };
+    presetRow.appendChild(b);
+  }
+  api.nickStyles().then((c) => {
+    catalog = c;
+    avoidRow.querySelector('.help').textContent = 'Never stop on names experienced players read as a nick at a glance: ' +
+      c.tells.filter((x) => x.example).map((x) => `${x.label} (${x.example})`).join(', ') + '. Names that read as offensive are always skipped.';
+    paintStyles();
+  });
+
+  p.appendChild(header('Requirements', 'A rolled name is taken when it passes every check below AND fits one of your styles above or one of your rules (if you set any).'));
   p.appendChild(fieldRow('Min length', '0 = any', number('nickRoller.minLength', 0, 16, 1)));
   p.appendChild(fieldRow('Max length', '16 = any', number('nickRoller.maxLength', 3, 16, 1)));
   p.appendChild(fieldRow('No digits', '', toggle('nickRoller.noDigits')));
@@ -521,10 +571,10 @@ function panelNickRoller(p) {
     const r = await api.checkNickRoller(testIn.value.trim());
     reqStatus.innerHTML = (r.platform !== 'win32' ? '<div class="bad">The nick roller only works on Windows.</div>' : '') +
       (r.font.ok ? `<div class="ok">✓ Minecraft font found (${esc(r.font.jar)})</div>` : `<div class="bad">✕ ${esc(r.font.error)}</div>`) +
-      (r.empty ? '<div class="bad">✕ No requirements yet - add a rule or enable a check.</div>' : '<div class="ok">✓ Requirements set</div>') +
+      (r.empty ? '<div class="bad">✕ No requirements yet - pick a nick style, add a rule or enable a check.</div>' : '<div class="ok">✓ Requirements set</div>') +
       r.errors.map((e) => `<div class="bad">✕ ${esc(e.source)} — ${esc(e.error)}</div>`).join('');
     if (!r.result) testOut.textContent = '';
-    else if (r.result.ok) testOut.innerHTML = '<span class="ok">✓ would stop here</span>';
+    else if (r.result.ok) testOut.innerHTML = '<span class="ok">✓ would stop here</span>' + (r.result.hits && r.result.hits.length ? ' <span class="dim">(' + esc(r.result.hits.join(', ')) + ')</span>' : '');
     else testOut.innerHTML = `<span class="bad">✕ ${esc(r.result.why)}</span>`;
   }
   ta.onchange = async () => { await set('nickRoller.rules', splitLines(ta.value)); refresh(); };

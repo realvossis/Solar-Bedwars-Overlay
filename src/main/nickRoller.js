@@ -8,6 +8,7 @@
 // the book disappears, a name can't be read, the roll limit is hit, or you press the hotkey.
 const { EventEmitter } = require('events');
 const nameRules = require('./nameRules');
+const nickStyles = require('./nickStyles');
 const { readRolledName } = require('./bookReader');
 
 const human = require('./humanMouse');
@@ -25,8 +26,9 @@ const REASONS = {
 // Lunar runs as javaw; vanilla/most launchers as java/javaw too.
 const isMinecraft = (fg) => !!fg && /^(javaw?|minecraft)$/i.test(fg.process || '');
 
-// Requirements = the built-in checks you enabled AND (if you wrote any) at least one of your
-// rules. Returns a function name -> { ok, why }.
+// Requirements = the built-in checks you enabled AND (if you set any) at least one of your rules or
+// chosen nick styles (see nickStyles.js) - and, with avoidObvious, none of the "obvious nick" tells.
+// A name that reads as offensive is never accepted. Returns { empty, errors, test(name) -> { ok, why } }.
 function buildRequirements(cfg, extraRules = []) {
   const r = cfg || {};
   const compiled = nameRules.compile([...(r.rules || []), ...extraRules]);
@@ -35,15 +37,21 @@ function buildRequirements(cfg, extraRules = []) {
   if (r.maxLength && r.maxLength < 16) checks.push((n) => n.length <= r.maxLength || `longer than ${r.maxLength}`);
   if (r.noDigits) checks.push((n) => !/\d/.test(n) || 'has digits');
   if (r.noUnderscore) checks.push((n) => !n.includes('_') || 'has an underscore');
-  const hasRules = compiled.rules.length > 0;
+  const known = new Set(nickStyles.STYLES.map((s) => s.id));
+  const styleIds = (Array.isArray(r.styles) ? r.styles : []).filter((id) => known.has(id));
+  const hasRules = compiled.rules.length > 0, hasStyles = styleIds.length > 0;
+  const avoid = r.avoidObvious !== false;
   return {
-    empty: !hasRules && !checks.length,
+    empty: !hasRules && !hasStyles && !checks.length,
     errors: compiled.errors,
     test(name) {
       for (const c of checks) { const res = c(name); if (res !== true) return { ok: false, why: res }; }
-      if (!hasRules) return { ok: true, hits: [] };
-      const hits = nameRules.match(compiled, name);
-      return hits.length ? { ok: true, hits } : { ok: false, why: 'no rule matched' };
+      const styles = hasStyles ? nickStyles.stylesOf(name, styleIds) : [];
+      const tells = nickStyles.tellsOf(name, styles.map((s) => s.id)).filter((t) => avoid || t.id === 'offensive');
+      if (tells.length) return { ok: false, why: 'looks like a nick: ' + tells[0].label };
+      if (!hasRules && !hasStyles) return { ok: true, hits: [] };
+      const hits = [...(hasRules ? nameRules.match(compiled, name) : []), ...styles.map((s) => s.name + ' style')];
+      return hits.length ? { ok: true, hits, styles } : { ok: false, why: hasRules ? 'no rule or style matched' : 'not one of your styles' };
     },
   };
 }

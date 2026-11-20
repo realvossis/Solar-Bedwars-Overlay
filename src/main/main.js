@@ -14,6 +14,7 @@ const { LogWatcher, validName } = require('./logWatcher');
 const nameRules = require('./nameRules');
 const fs = require('fs');
 const { NickRoller, buildRequirements } = require('./nickRoller');
+const nickStyles = require('./nickStyles');
 const { Notifier, raiseInactive } = require('./notifications');
 const chatWarn = require('./chatWarn');
 const statsLib = require('./stats');
@@ -1087,6 +1088,8 @@ function registerIpc() {
 
   handle('nickRoller:status', () => nickRoller.state);
   handle('nickRoller:stop', () => { nickRoller.stop('stopped from the app'); return true; });
+  // The built-in nick styles + obvious-nick tells, for Settings -> Nick Roller (static data).
+  handle('nickRoller:styles', () => ({ styles: nickStyles.STYLES.map(({ id, name, tier, desc, examples }) => ({ id, name, tier, desc, examples })), tells: nickStyles.TELLS.map(({ id, label, example }) => ({ id, label, example })) }));
   // Settings' preview: are the requirements usable, would this name pass, and can we find the font?
   handle('nickRoller:check', (_e, name) => {
     const cfg = getConfig(), rc = cfg.nickRoller || {};
@@ -1283,9 +1286,11 @@ if (!app.requestSingleInstanceLock()) {
 
     app.on('activate', () => { if (!overlayWin) { createOverlay(); overlayWin.show(); } });
     // Dev only: SOLAR_SHOTS=<dir> opens Settings and saves screenshots of the real windows after
-    // the splash, for checking the UI without clicking around. Ignored in packaged builds.
+    // the splash, for checking the UI without clicking around (SOLAR_SHOTS_JS runs in Settings
+    // first, e.g. to open a tab). Ignored in packaged builds.
     if (!app.isPackaged && process.env.SOLAR_SHOTS) {
       setTimeout(openSettings, 4500);
+      if (process.env.SOLAR_SHOTS_JS) setTimeout(() => settingsWin && settingsWin.webContents.executeJavaScript(process.env.SOLAR_SHOTS_JS).catch(() => {}), 6000);
       setTimeout(async () => {
         for (const [n, w] of [['overlay', overlayWin], ['settings', settingsWin]]) {
           if (w && !w.isDestroyed()) fs.writeFileSync(path.join(process.env.SOLAR_SHOTS, n + '.png'), (await w.webContents.capturePage()).toPNG());

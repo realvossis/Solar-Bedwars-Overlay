@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld('solarBridge', {
   nickRollerStatus: () => invoke('nickRoller:status'),
   stopNickRoller: () => invoke('nickRoller:stop'),
   checkNickRoller: (name) => invoke('nickRoller:check', name),
+  nickStyles: () => invoke('nickRoller:styles'),
   chatWarnPreview: (party, pub) => invoke('chatWarn:preview', party, pub),
   safeDodgeCommand: (cmd) => invoke('chatWarn:safeCommand', cmd),
   decoyStatus: () => invoke('decoy:status'),
