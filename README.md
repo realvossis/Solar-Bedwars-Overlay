@@ -154,9 +154,18 @@ rank → skin → **Use a random name**, then with that page open and Minecraft 
 The overlay reads each rolled name off the screen, checks it, and clicks **TRY AGAIN** until one
 matches. It then stops with the book open, and picking **USE NAME** is your own click.
 
+- **Nick styles:** pick the shapes you want instead of writing regexes. They're ranked from how
+  players grade rolled nicks: **S** OG word (*Frost*), stretched word (*Eagleeee*, *Snakeeeee*),
+  short (3–4 letters); **A** echo (*BlueBlueBlue*), *Word_Word* (*Nice_Night*), *TwoWords*
+  (*FluffyTea*), semi-OG (*Ravens*, *Glitching*); **B** `__wrapped__`, short + digit (*Tony9*),
+  *xXclassicXx*; **C** NameYear (*Jake2009*), Name + numbers (*Rory417*). Presets: OG only / Looks
+  legit / All clean. A curated word and first-name list tells real words from random letters.
+- **Skip obvious nicks** (on by default): never stops on names experienced players read as a nick
+  at a glance: *The…* (*TheLegitPyro*), *Im_/Its…* (*im_esme265*), leetspeak (*theluckysn4ke*),
+  3+ trailing digits, *firstnamelastnameYEAR*. Names that read as offensive are always skipped.
 - **Requirements:** min/max length, no digits, no underscores, plus your own rules (same syntax
-  as Name Watch, and you can reuse your Name Watch list). A name must pass every check and match at
-  least one rule, if you've written any.
+  as Name Watch, and you can reuse your Name Watch list). A name must pass every check and fit at
+  least one chosen style or rule, if you've set any.
 - **Accurate reading:** the name is read by matching every character against the real Minecraft
   font from your own 1.8.9 jar. The font isn't bundled. Generic OCR misreads Minecraft's font
   (M→H, 0→Ø). This matcher works at any GUI scale and refuses to guess: an unclear read stops the run.
@@ -169,7 +178,7 @@ matches. It then stops with the book open, and picking **USE NAME** is your own 
   TRY AGAIN rather than its exact centre. Hypixel's server never sees your cursor; the glide is only
   what you see on screen.
 - **Requirements to run:** Windows, and borderless or windowed mode (exclusive fullscreen can't be
-  captured). A Minecraft 1.8.9 jar must be present; it's found automatically in `.minecraft`, or you
+  captured). A Minecraft 1.8.9 jar must be present; it's found automatically (vanilla `.minecraft` or OneClient), or you
   can set the path.
 
 > Automating the nick book is a grey area under Hypixel's rules. Use it at your own discretion.

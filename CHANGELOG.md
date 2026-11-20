@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.2 — 2026-11-20
+
+### Fixed
+- **Scrambled pre-game names no longer fill the list.** After requeueing straight from a finished game
+  (Duels, "play again"), Solar still counted you as mid-match for a moment, so the next lobby's
+  scrambled join names (`+ (2/2) v9gAKXHK`) slipped in as fake nicked players. Game start is now tracked
+  per server, and every "Sending you to ..." counts as a new game, even back to the same server.
+  Checked by replaying real OneClient Duels requeues and a Bed Wars pre-game into the app.
+
+### Added
+- **Your own nick is recognised.** The name that arrives with you, and only you, in two separate games is your
+  nick (a nicked teammate warping in with you never counts). It is then treated as you: no row in
+  your list, no "nicked player" alert about yourself, and mentions of it work.
+- **Nick styles for the nick roller.** Pick the shapes you want instead of writing rules, ranked
+  from how players grade rolled nicks: OG word, stretched (*Eagleeee*), short, echo (*BlueBlueBlue*),
+  *Word_Word*, *TwoWords*, semi-OG, `__wrapped__`, short + digit, *xXclassicXx*, NameYear, Name +
+  numbers, with presets. **Skip obvious nicks** (on) never stops on *The…*, *Im_/Its…*, leetspeak,
+  *Name###* or *firstnamelastnameYEAR* names; names that read as offensive are always skipped.
+
+(1.3.1 was replaced by this release.)
+
 ## 1.3.1 — 2026-11-15
 
 ### Added
