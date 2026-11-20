@@ -25,6 +25,7 @@ const { DiscordRpc } = require('./discordRpc');
 const decoy = require('./decoyPresence');
 const clients = require('./clients');
 const { Locator, describe: describePlace } = require('./location');
+const { SelfNick } = require('./selfNick');
 const { Updater } = require('./updater');
 
 // ---------------- rendering pipeline ----------------
@@ -164,6 +165,10 @@ function finishSplash() {
 //   always - always shown; Alt+B still hides it and that choice sticks.
 // Notifications are separate and keep working in every mode.
 let splashFinished = false, inMatch = false, overlayOverride = null, matchStartTimer = null, lobbyTimer = null;
+// Has the game on the CURRENT server started? Unlike inMatch (which also drives the overlay's
+// visibility and lingers for a moment after a server switch), this resets the instant you land
+// somewhere new - it's what keeps pre-game scrambled names out of the list.
+let gameStarted = false;
 const overlayMode = () => { const m = getConfig().overlayMode; return m === 'manual' || m === 'always' ? m : 'auto'; };
 function overlayWanted() {
   if (overlayOverride !== null) return overlayOverride;
@@ -285,7 +290,21 @@ function chooseLog() {
   }
   return clients.pickActive(clients.detectLogs());
 }
-function selfNames() { const cfg = getConfig(); return [cfg.selfName || sessionName, ...(cfg.reactNames || [])]; }
+function selfNames() { const cfg = getConfig(); return [cfg.selfName || sessionName, sessionNick, ...(cfg.reactNames || [])].filter(Boolean); }
+const isMe = (n) => selfNames().some((s) => String(s).toLowerCase() === String(n).toLowerCase());
+
+// ---- your own nick (see selfNick.js) ----
+const selfNick = new SelfNick();
+let sessionNick = null;
+function judgeArrival() {
+  const party = new Set([...roster.players.values()].filter((r) => r.source === 'PARTY').map((r) => r.key));
+  const nick = selfNick.judge(isMe, party);
+  if (!nick) return;
+  sessionNick = nick;
+  watcher.setSelfNames(selfNames());
+  roster.removeByName(nick);
+  toast('Your nick: ' + nick + ' - treated as you this session');
+}
 function startWatcher() {
   const cfg = getConfig();
   watcher.setSelfNames(selfNames());
@@ -366,10 +385,12 @@ function wireWatcher() {
   // real names), and everyone once the game starts and the real player list is revealed.
   // The same scrambling shows up in Duels and other games' pre-game lobbies (and on every client), so
   // join lines are ignored in any game until it starts.
-  const scrambledJoins = () => locator.inGameServer && !inMatch;
+  const scrambledJoins = () => locator.inGameServer && !gameStarted;
   watcher.on('lobbyJoin', (n, kind) => {
     // Someone joining "the lobby" means you're in one - no game instance ever shows that line.
     if (kind === 'lobby') { onPlaceSignal({ via: 'chat', lobby: true }); return; }
+    selfNick.joined(n);
+    if (isMe(n)) return;
     if (inBedwarsMatch() && !scrambledJoins()) roster.addNames([n], 'GAME');
   });
   watcher.on('lobbyEntered', () => onPlaceSignal({ via: 'chat', lobby: true, self: true }));
@@ -381,7 +402,7 @@ function wireWatcher() {
   });
   // Opt-in (see trackChatSpeakers in Settings) on top of that - some people still don't want
   // random match-lobby chatter added even once scoped correctly.
-  watcher.on('chatSpeaker', (n) => { if (getConfig().trackChatSpeakers && inBedwarsMatch()) roster.addNames([n], 'GAME'); });
+  watcher.on('chatSpeaker', (n) => { if (getConfig().trackChatSpeakers && inBedwarsMatch() && !isMe(n)) roster.addNames([n], 'GAME'); });
   watcher.on('quit', (n) => { if (!scrambledJoins()) roster.markLeft(n); });
   // Housing fires its own serverChange twice in a row - once for the housing lobby, once more
   // for the actual house instance right after the teleport message names its owner - so a plain
@@ -396,8 +417,9 @@ function wireWatcher() {
     roster.addNames([owner], 'house');
   });
   // Match phases -> overlay auto-hide.
-  watcher.on('matchStarting', () => { clearTimeout(matchStartTimer); matchStartTimer = setTimeout(() => setInMatch(true), 1500); });
+  watcher.on('matchStarting', () => { clearTimeout(matchStartTimer); matchStartTimer = setTimeout(() => { gameStarted = true; setInMatch(true); }, 1500); });
   watcher.on('matchStart', (gametype) => {
+    gameStarted = true;
     if (gametype && locator.gameStarted(gametype)) { decoyOnServer(); pushGameStatus(); }
     setInMatch(true);
   });
@@ -412,6 +434,7 @@ function wireWatcher() {
   });
   // Everything that resets when you really land somewhere new.
   function newLobby() {
+    gameStarted = false; clearTimeout(matchStartTimer); matchStartTimer = null;
     threatsAlerted.clear(); nicksAlerted.clear(); // new lobby: fresh heads-ups
     partyWarned.clear(); partyWarnQueue.length = 0; publicWarnIndex = 0; pendingDodge = null; dodgedThisLobby = false;
     pendingSummary = null; summaryDoneThisMatch = false; pendingLocraw = null;
@@ -425,6 +448,7 @@ function wireWatcher() {
     if (r === 'ignore') return;
     const p = locator.place;
     if (r === 'change') newLobby();
+    if (r === 'change' && p.kind === 'game') { selfNick.arrived(); setTimeout(judgeArrival, 1600); }
     if (p.kind !== 'game') {
       setInMatch(false);
     } else if (p.gametype) {
@@ -570,7 +594,7 @@ function checkNick(row) {
   if (!lobbyAlertsAllowed()) return;
   if (!row.nicked || row.source === 'SELF' || row.source === 'PARTY' || row.left || nicksAlerted.has(row.key)) return;
   const cfg = getConfig();
-  const mine = [cfg.selfName, ...(cfg.reactNames || [])].map((n) => String(n || '').toLowerCase());
+  const mine = [cfg.selfName, sessionNick, ...(cfg.reactNames || [])].map((n) => String(n || '').toLowerCase());
   if (mine.includes(row.key)) return;
   nicksAlerted.add(row.key);
   notifyUser('nicked', { title: 'Nicked player in your lobby', player: row.name, text: row.nickReason ? 'Why: ' + row.nickReason + '.' : 'Stats and blacklist tags are hidden behind the nick.' }, `Nicked: ${row.name}`, 'warn');
@@ -1215,7 +1239,10 @@ if (!app.requestSingleInstanceLock()) {
     roster = new Roster(hypixel, urchin, getConfig);
     watcher = new LogWatcher();
 
-    roster.on('update', (list) => broadcast('roster:update', list));
+    roster.on('update', (list) => {
+      broadcast('roster:update', list);
+      if (!app.isPackaged && process.env.SOLAR_DEBUG) console.log('[roster]', list.map((r) => r.name + (r.source !== 'GAME' ? '(' + r.source + ')' : '')).join(' '));
+    });
     roster.on('nameMatch', (row) => {
       if ((getConfig().nameWatch || {}).notify === false) return;
       notifyUser('nameWatch', { title: 'Name Watch', player: row.name, text: 'Matches ' + row.nameMatch.join(', ') }, `Name Watch: ${row.name} matches ${row.nameMatch.join(', ')}`, 'warn');

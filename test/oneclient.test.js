@@ -178,11 +178,21 @@ t('status API fills in the game only for the matching kind of place', () => {
   assert.strictEqual(l.signal({ via: 'api', gametype: 'DUELS', mode: 'DUELS_SUMO_DUEL' }), 'enrich');
   assert.strictEqual(l.gametype, 'DUELS');
 });
-t('a repeated "Sending you to X" is not a new switch', () => {
+t('"Sending you to X" again (quick requeue to the same server) is a new game there', () => {
   const l = locator();
   l.signal({ via: 'chat', server: 'mini9' });
-  l.tick(2000);
-  assert.strictEqual(l.signal({ via: 'chat', server: 'mini9' }), 'ignore');
+  const gen = l.gen;
+  l.tick(6000);
+  assert.strictEqual(l.signal({ via: 'chat', server: 'mini9' }), 'change');
+  assert.ok(l.gen > gen);
+});
+t('a requeue after Lunar\'s blob for the same server is a new game too', () => {
+  const l = locator();
+  l.signal({ via: 'chat', server: 'mini5' });
+  l.signal({ via: 'locraw', server: 'mini5', gametype: 'DUELS', mode: 'DUELS_SUMO_DUEL' });
+  l.tick(9000);
+  assert.strictEqual(l.signal({ via: 'chat', server: 'mini5' }), 'change');
+  assert.strictEqual(l.gametype, null);
 });
 t('the Bed Wars banner settles an unknown game', () => {
   const l = locator();

@@ -46,11 +46,13 @@ class Locator {
       return 'enrich';
     }
     if (info.via === 'chat') {
+      // Lobby-join lines repeat all the time while you stand in a lobby; only the first one counts.
       if (info.lobby) {
         if (p.kind === 'lobby' || p.kind === 'limbo') return 'ignore';
         if (!info.self && p.kind === 'game' && t - p.at < STRAGGLER_MS) return 'ignore';
-      } else if (sameSpot && recent) return 'ignore'; // "Sending you to X!" (2) - a repeat
-      if (p.via !== 'chat' && p.via && recent && sameSpot) return 'ignore'; // already known exactly
+      }
+      // "Sending you to X!" is printed once per real transfer - even back to the same server a few
+      // seconds later (a quick requeue, OneClient marking it "(2)") is a brand-new game there.
       this.gen++;
       this.place = { server: info.lobby ? 'lobby' : info.server, gametype: null, mode: null, map: null, kind, via: 'chat', at: t };
       return 'change';
